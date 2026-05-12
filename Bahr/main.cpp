@@ -1,10 +1,24 @@
+
+/*
+ * Computer Graphics Term Project - Person 3 Implementation
+ *
+ * Responsibilities:
+ * - Change background color (Preferences menu)
+ * - Choose shape drawing color (Preferences menu)
+ * - DDA Line algorithm
+ * - Midpoint Line algorithm (Bresenham's)
+ * - Modified Midpoint Circle algorithm (Faster Bresenham variant)
+ * - Change mouse pointer (Preferences menu)
+ *
+ * All drawing uses mouse-only input (no keyboard)
+ */
+
 #include <windows.h>
 #include <cmath>
 #include <vector>
 #include <iostream>
 #include <string>
 using namespace std;
-
 // ============================================================================
 // MENU IDS
 // ============================================================================
@@ -24,11 +38,10 @@ using namespace std;
 #define IDM_LINES_MIDPOINT             202
 #define IDM_CIRCLES_MODIFIED_MIDPOINT  301
 #define IDM_FILE_CLEAR                 401
-// ============================================================================
+
 // GLOBAL VARIABLES
-// ============================================================================
-COLORREF g_backgroundColor = RGB(0, 0, 0);
-COLORREF g_drawColor = RGB(255, 255, 255);
+COLORREF g_backgroundColor = RGB(0, 0, 0);      // Default black background
+COLORREF g_drawColor = RGB(255, 255, 255);      // Default white drawing color
 
 enum DrawMode {
     MODE_NONE,
@@ -43,10 +56,10 @@ enum DrawMode {
 };
 
 DrawMode g_currentMode = MODE_NONE;
-
+// Mouse click state
 bool g_firstClick = false;
 int  g_startX = 0, g_startY = 0;
-
+// Mouse click state
 struct Shape {
     DrawMode mode;
     COLORREF color;
@@ -60,103 +73,160 @@ vector<POINT>  g_polygonPoints;
 int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400;
 
 // ============================================================================
-// HELPER
+// HELPER FUNCTIONS
 // ============================================================================
 int Round(double x) { return (int)(x + 0.5); }
 
-// FIX 1: Renamed to SwapPoints to avoid conflict with std::swap
-void SwapPoints(int& x1, int& y1, int& x2, int& y2) {
-    int t;
-    t = x1; x1 = x2; x2 = t;
-    t = y1; y1 = y2; y2 = t;
+void swap(int& a, int& b, int& c, int& d) {
+    int temp;
+    temp = a; a = c; c = temp;
+    temp = b; b = d; d = temp;
 }
-
 // ============================================================================
 // DRAW 8 SYMMETRIC POINTS
 // ============================================================================
 void Draw8Points(HDC hdc, int xc, int yc, int x, int y, COLORREF color) {
-    SetPixel(hdc, xc + x, yc + y, color);
-    SetPixel(hdc, xc - x, yc + y, color);
-    SetPixel(hdc, xc - x, yc - y, color);
-    SetPixel(hdc, xc + x, yc - y, color);
-    SetPixel(hdc, xc + y, yc + x, color);
-    SetPixel(hdc, xc - y, yc + x, color);
-    SetPixel(hdc, xc - y, yc - x, color);
-    SetPixel(hdc, xc + y, yc - x, color);
+    SetPixel(hdc, xc + x, yc + y, color);    // Quadrant I
+    SetPixel(hdc, xc - x, yc + y, color);    // Quadrant II
+    SetPixel(hdc, xc - x, yc - y, color);    // Quadrant III
+    SetPixel(hdc, xc + x, yc - y, color);    // Quadrant IV
+    SetPixel(hdc, xc + y, yc + x, color);    // Octant between I and II
+    SetPixel(hdc, xc - y, yc + x, color);    // Octant between II and III
+    SetPixel(hdc, xc - y, yc - x, color);    // Octant between III and IV
+    SetPixel(hdc, xc + y, yc - x, color);    // Octant between IV and I
 }
 
 // ============================================================================
 // ALGORITHM 1: DDA LINE
+// Reference: LEC2.md - Digital Differential Analyzer
 // ============================================================================
 void DrawLineDDA(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c) {
     int dx = x2 - x1;
     int dy = y2 - y1;
 
+    // Check if the line is more horizontal than vertical (|slope| <= 1)
     if (abs(dy) <= abs(dx)) {
-        if (x1 > x2) SwapPoints(x1, y1, x2, y2);   // FIX 1 applied
-        double m = (dx == 0) ? 0.0 : (double)(y2 - y1) / (x2 - x1);
+        double m = (double)dy / dx;
+
+        // Ensure we always draw from left to right
+        if (x1 > x2) swap(x1, y1, x2, y2);
+
+        SetPixel(hdc, x1, y1, c);
+
+        int x = x1;
         double y = y1;
-        for (int x = x1; x <= x2; x++, y += m)
+
+        while (x < x2) {
+            x++;
+            y += m;
             SetPixel(hdc, x, Round(y), c);
+        }
     }
     else {
-        if (y1 > y2) SwapPoints(x1, y1, x2, y2);   // FIX 1 applied
-        double mi = (dy == 0) ? 0.0 : (double)(x2 - x1) / (y2 - y1);
+        // Steep slope: step along y-axis
+        double mi = (double)dx / dy;
+
+        if (y1 > y2) swap(x1, y1, x2, y2);
+
+        SetPixel(hdc, x1, y1, c);
+
+        int y = y1;
         double x = x1;
-        for (int y = y1; y <= y2; y++, x += mi)
+
+        while (y < y2) {
+            y++;
+            x += mi;
             SetPixel(hdc, Round(x), y, c);
+        }
     }
 }
 
 // ============================================================================
-// ALGORITHM 2: MIDPOINT LINE (Bresenham)
+// ALGORITHM 2: MIDPOINT LINE (Bresenham's Line)
+// Reference: LEC2.md - MidPoint Algorithm
 // ============================================================================
 void DrawLineMidpoint(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c) {
     int dx = abs(x2 - x1);
     int dy = abs(y2 - y1);
+
+    // Determine direction of line
     int sx = (x1 < x2) ? 1 : -1;
     int sy = (y1 < y2) ? 1 : -1;
-    int x = x1, y = y1;
 
+    int x = x1;
+    int y = y1;
+
+    // Case 1: Gentle slope (|m| <= 1)
     if (dx >= dy) {
         int d = dx - 2 * dy;
+        int delta_d1 = 2 * dx - 2 * dy;
+        int delta_d2 = -2 * dy;
+
         SetPixel(hdc, x, y, c);
+
         while (x != x2) {
-            if (d < 0) { y += sy; d += 2 * dx - 2 * dy; }
-            else { d -= 2 * dy; }
+            if (d < 0) {
+                y += sy;
+                d += delta_d1;
+            }
+            else {
+                d += delta_d2;
+            }
             x += sx;
             SetPixel(hdc, x, y, c);
         }
     }
+    // Case 2: Steep slope (|m| > 1)
     else {
         int d = dy - 2 * dx;
+        int delta_d1 = 2 * dy - 2 * dx;
+        int delta_d2 = -2 * dx;
+
         SetPixel(hdc, x, y, c);
+
         while (y != y2) {
-            if (d < 0) { x += sx; d += 2 * dy - 2 * dx; }
-            else { d -= 2 * dx; }
+            if (d < 0) {
+                x += sx;
+                d += delta_d1;
+            }
+            else {
+                d += delta_d2;
+            }
             y += sy;
             SetPixel(hdc, x, y, c);
         }
     }
 }
-
 // ============================================================================
-// ALGORITHM 3: MODIFIED MIDPOINT CIRCLE
+// ALGORITHM 3: MODIFIED MIDPOINT CIRCLE (Faster Bresenham variant)
+// Reference: Circle Drawing Algorithms.md - Section 5.6
+// Uses 2nd order differences for maximum speed
 // ============================================================================
 void DrawCircleModifiedMidpoint(HDC hdc, int xc, int yc, int R, COLORREF color) {
     int x = 0, y = R;
-    int d = 1 - R;
-    int c1 = 3;
-    int c2 = 5 - 2 * R;
+    int d = 1 - R;                    // Initial decision variable
+    int c1 = 3;                       // Initial increment value (2*x + 3)
+    int c2 = 5 - 2 * R;               // Initial increment value (2*(x-y) + 5)
+
     Draw8Points(hdc, xc, yc, x, y, color);
+
     while (x < y) {
-        if (d < 0) { d += c1; c2 += 2; }
-        else { d += c2; c2 += 4; y--; }
-        c1 += 2; x++;
+        if (d < 0) {
+            // Move right only (midpoint inside circle)
+            d += c1;
+            c2 += 2;
+        }
+        else {
+            // Move right and down (midpoint outside circle)
+            d += c2;
+            c2 += 4;
+            y--;
+        }
+        c1 += 2;
+        x++;
         Draw8Points(hdc, xc, yc, x, y, color);
     }
 }
-
 // ============================================================================
 // ALGORITHM 4: DIRECT CIRCLE
 // ============================================================================
@@ -375,18 +445,25 @@ void RenderShape(HDC hdc, const Shape& s) {
 // ============================================================================
 // COLOR CHOOSER HELPERS
 // ============================================================================
-static COLORREF g_custColors[16] = { 0 };
-
 void ChooseDrawingColor(HWND hwnd) {
-    CHOOSECOLOR cc; ZeroMemory(&cc, sizeof(cc));
+    CHOOSECOLOR cc;
+    static COLORREF customColors[16];
+
+    ZeroMemory(&cc, sizeof(cc));
     cc.lStructSize = sizeof(cc);
     cc.hwndOwner = hwnd;
-    cc.lpCustColors = g_custColors;
+    cc.lpCustColors = customColors;
     cc.rgbResult = g_drawColor;
     cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-    if (ChooseColor(&cc)) g_drawColor = cc.rgbResult;
-}
 
+    if (ChooseColor(&cc)) {
+        g_drawColor = cc.rgbResult;
+        cout << "Drawing color changed to RGB("
+            << (int)GetRValue(g_drawColor) << ", "
+            << (int)GetGValue(g_drawColor) << ", "
+            << (int)GetBValue(g_drawColor) << ")" << endl;
+    }
+}
 // ============================================================================
 // MENU CREATION
 // ============================================================================
@@ -465,7 +542,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
 
     case WM_CREATE: {
+        // Attach menu to window
         SetMenu(hwnd, CreateMainMenu());
+
+        // Open console for messages
         AllocConsole();
         FILE* fp; freopen_s(&fp, "CONOUT$", "w", stdout);
         cout << "=== Computer Graphics Project ===" << endl;
@@ -475,8 +555,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_COMMAND: {
-        int id = LOWORD(wParam);
-        switch (id) {
+        int menuId = LOWORD(wParam);
+        switch (menuId) {
 
         case IDM_FILE_CLEAR:
             g_shapes.clear(); g_firstClick = false;
@@ -484,32 +564,53 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "Screen cleared." << endl;
             break;
 
+            // Preferences - Background
         case IDM_PREFERENCES_BG_WHITE:
             g_backgroundColor = RGB(255, 255, 255);
             InvalidateRect(hwnd, NULL, TRUE);
-            cout << "Background: white" << endl;
+            cout << "Background color changed to White." << endl;
             break;
 
         case IDM_PREFERENCES_CHOOSE_COLOR:
             ChooseDrawingColor(hwnd);
             break;
-
+            // Preferences - Cursor
         case IDM_PREFERENCES_CURSOR_ARROW:
-            hCur = LoadCursor(NULL, IDC_ARROW);   SetCursor(hCur); break;
+            hCur = LoadCursor(NULL, IDC_ARROW);
+            SetCursor(hCur);
+            cout << "Mouse cursor changed to Arrow." << endl;
+            break;
         case IDM_PREFERENCES_CURSOR_CROSS:
-            hCur = LoadCursor(NULL, IDC_CROSS);   SetCursor(hCur); break;
+            hCur = LoadCursor(NULL, IDC_CROSS);
+            SetCursor(hCur);
+            cout << "Mouse cursor changed to Crosshair." << endl;
+            break;
         case IDM_PREFERENCES_CURSOR_HAND:
-            hCur = LoadCursor(NULL, IDC_HAND);    SetCursor(hCur); break;
+            hCur = LoadCursor(NULL, IDC_HAND);
+            SetCursor(hCur);
+            cout << "Mouse cursor changed to Hand." << endl;
+            break;
+            
 
+            // Lines Menu
         case IDM_LINES_DDA:
-            g_currentMode = MODE_DDA_LINE; g_firstClick = false;
-            cout << "Mode: DDA Line" << endl; break;
+            g_currentMode = MODE_DDA_LINE;
+            g_firstClick = false;
+            cout << "\n[DDA Line Mode] Click two points to draw a line." << endl;
+            break;
         case IDM_LINES_MIDPOINT:
-            g_currentMode = MODE_MIDPOINT_LINE; g_firstClick = false;
-            cout << "Mode: Midpoint Line" << endl; break;
+            g_currentMode = MODE_MIDPOINT_LINE;
+            g_firstClick = false;
+            cout << "\n[Midpoint Line Mode] Click two points to draw a line." << endl;
+            break;
+
+            // Circles Menu
         case IDM_CIRCLES_MODIFIED_MIDPOINT:
-            g_currentMode = MODE_MODIFIED_MIDPOINT_CIRCLE; g_firstClick = false;
-            cout << "Mode: Modified Midpoint Circle" << endl; break;
+            g_currentMode = MODE_MODIFIED_MIDPOINT_CIRCLE;
+            g_firstClick = false;
+            cout << "\n[Modified Midpoint Circle Mode] Click center, then a point on the radius." << endl;
+            break;
+
         case IDM_CIRCLES_DIRECT:
             g_currentMode = MODE_DIRECT_CIRCLE; g_firstClick = false;
             cout << "Mode: Direct Circle" << endl; break;
@@ -562,9 +663,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_LBUTTONDOWN: {
-        int x = LOWORD(lParam), y = HIWORD(lParam);
+        int x = LOWORD(lParam);
+        int   y = HIWORD(lParam);
         if (g_currentMode == MODE_NONE) {
-            cout << "Select a drawing mode first." << endl; break;
+            cout << "Please select a drawing mode from the menu first." << endl;
+            break;
         }
         // --- Point Clipping ---
         if (g_currentMode == MODE_CLIP_POINT) {
@@ -683,42 +786,42 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 // ============================================================================
 // MAIN
 // ============================================================================
-    int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nShow) {
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nShow) {
 
-        WNDCLASS wc = { 0 };
-        wc.lpfnWndProc = WndProc;
-        wc.hInstance = hInst;
-        wc.lpszClassName = L"CGProject";
-        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.style = CS_HREDRAW | CS_VREDRAW;
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = L"CGProject";
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
 
-        if (!RegisterClass(&wc)) {
-            MessageBox(NULL, L"RegisterClass failed!", L"Error", MB_ICONERROR);
-            return 0;
-        }
+    if (!RegisterClass(&wc)) {
+        MessageBox(NULL, L"RegisterClass failed!", L"Error", MB_ICONERROR);
+        return 0;
+    }
 
-        RECT wr = { 0, 0, 800, 600 };
-        AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, TRUE);
+    RECT wr = { 0, 0, 800, 600 };
+    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, TRUE);
 
-        HWND hwnd = CreateWindow(
-            L"CGProject",
-            L"Computer Graphics Project",
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT, CW_USEDEFAULT,
-            wr.right - wr.left,
-            wr.bottom - wr.top,
-            NULL, NULL, hInst, NULL
-        );
+    HWND hwnd = CreateWindow(
+        L"CGProject",
+        L"Computer Graphics Project",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        wr.right - wr.left,
+        wr.bottom - wr.top,
+        NULL, NULL, hInst, NULL
+    );
 
-        if (!hwnd) {
-            MessageBox(NULL, L"CreateWindow failed!", L"Error", MB_ICONERROR);
-            return 0;
-        }
+    if (!hwnd) {
+        MessageBox(NULL, L"CreateWindow failed!", L"Error", MB_ICONERROR);
+        return 0;
+    }
 
-        ShowWindow(hwnd, nShow);
-        UpdateWindow(hwnd);
-    
+    ShowWindow(hwnd, nShow);
+    UpdateWindow(hwnd);
+
     MSG msg = { 0 };
     while (GetMessage(&msg, NULL, 0, 0) > 0) {
         TranslateMessage(&msg);
