@@ -1,3 +1,18 @@
+
+/*
+ * Computer Graphics Term Project - Person 3 Implementation
+ *
+ * Responsibilities:
+ * - Change background color (Preferences menu)
+ * - Choose shape drawing color (Preferences menu)
+ * - DDA Line algorithm
+ * - Midpoint Line algorithm (Bresenham's)
+ * - Modified Midpoint Circle algorithm (Faster Bresenham variant)
+ * - Change mouse pointer (Preferences menu)
+ *
+ * All drawing uses mouse-only input (no keyboard)
+ */
+
 #include <windows.h>
 #include <cmath>
 #include <vector>
@@ -31,6 +46,7 @@ using namespace std;
 #define IDM_ELLIPSE_DIRECT             602
 #define IDM_ELLIPSE_MIDPOINT           603
 #define IDM_FILL_CIRCLES_LINES         701
+#define IDM_FACE_DRAW                  801 
 
 
 
@@ -60,6 +76,7 @@ enum DrawMode {
     MODE_CLIP_POLYGON,
     MODE_CLIP_CIRCLE_POINT,
     MODE_CLIP_CIRCLE_LINE,
+    MODE_FACE_DRAW,
 };
 
 DrawMode g_currentMode = MODE_NONE;
@@ -98,7 +115,7 @@ bool CheckIFPointINCircle(int R, int xc, int yc, int x, int y) {
 bool FindCircle(int x, int y, int& xc, int& yc, int& R) {
     for (auto& s : g_shapes) {
         if (s.mode == MODE_DIRECT_CIRCLE ||
-            s.mode == MODE_BRESENHAM_CIRCLE ||
+            s.mode == MODE_BRESENHAM_CIRCLE || 
             s.mode == MODE_MODIFIED_MIDPOINT_CIRCLE ||
             s.mode == MODE_POLAR_CIRCLE ||
             s.mode == MODE_ITERATIVE_POLAR_CIRCLE)
@@ -135,10 +152,10 @@ void Draw8Points(HDC hdc, int xc, int yc, int x, int y, COLORREF color) {
 // DRAW 4 SYMMETRIC POINTS FOR ELLIPSE
 // ============================================================================
 void Draw4Points(HDC hdc, int xc, int yc, int x, int y, COLORREF color) {
-    SetPixel(hdc, xc + x, yc + y, color);
-    SetPixel(hdc, xc - x, yc + y, color);
-    SetPixel(hdc, xc + x, yc - y, color);
-    SetPixel(hdc, xc - x, yc - y, color);
+    SetPixel(hdc, xc + x, yc + y, color); 
+    SetPixel(hdc, xc - x, yc + y, color);    
+    SetPixel(hdc, xc + x, yc - y, color);    
+    SetPixel(hdc, xc - x, yc - y, color);   
 }
 
 // ============================================================================
@@ -739,32 +756,6 @@ void FillSquareHermite(HDC hdc,int left,int top,int size,COLORREF c)
     }
 }
 
-
-Point Bezier(Point p0, Point p1, Point p2, Point p3, double t)
-{
-    double c1 = pow(1 - t, 3);
-    double c2 = 3 * t * pow(1 - t, 2);
-    double c3 = 3 * t * t * (1 - t);
-    double c4 = t * t * t;
-
-    Point p;
-
-    p.x = c1 * p0.x + c2 * p1.x + c3 * p2.x + c4 * p3.x;
-    p.y = c1 * p0.y + c2 * p1.y + c3 * p2.y + c4 * p3.y;
-
-    return p;
-}
-
-void DrawBezier(HDC hdc, Point p0, Point p1, Point p2, Point p3, COLORREF c)
-{
-    for(double t = 0; t <= 1; t += 0.001)
-    {
-        Point p = Bezier(p0,p1,p2,p3,t);
-
-        SetPixel(hdc,p.x,p.y,c);
-    }
-}
-
 void FillRectangleBezier(HDC hdc,int left,int top,int right,int bottom,COLORREF c)
 {
     for(int y = top; y <= bottom; y += 5)
@@ -901,6 +892,7 @@ HMENU CreateMainMenu() {
     AppendMenu(hPref, MF_STRING, IDM_PREFERENCES_BG_WHITE, L"Background: white");
     AppendMenu(hPref, MF_STRING, IDM_PREFERENCES_CHOOSE_COLOR, L"Choose Drawing Color...");
     AppendMenu(hPref, MF_SEPARATOR, 0, NULL);
+
     HMENU hCur = CreatePopupMenu();
     AppendMenu(hCur, MF_STRING, IDM_PREFERENCES_CURSOR_ARROW, L"Arrow");
     AppendMenu(hCur, MF_STRING, IDM_PREFERENCES_CURSOR_CROSS, L"Crosshair");
@@ -938,6 +930,10 @@ HMENU CreateMainMenu() {
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_POINT, L"Circular Point Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_LINE, L"Circular Line Clipping");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hClip, L"Clipping");
+
+    HMENU hBouns = CreatePopupMenu();
+    AppendMenu(hBouns, MF_STRING, IDM_FACE_DRAW, L"Draw Face");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)hBouns, L"Bouns");
 
     return bar;
 }
@@ -1100,6 +1096,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case IDM_CIRCLE_CLIP_LINE:
             g_currentMode = MODE_CLIP_CIRCLE_LINE; g_firstClick = false;
             cout << "Circle Line Clipping Mode -> click 2 points" << endl; break;
+        case IDM_FACE_DRAW:
+            g_currentMode = MODE_FACE_DRAW; g_firstClick = false;
+            cout << "Face Drawing Mode-> 2 clicks to make FACE\n 2 clicks for each EYE\n 2 clicks for NOSE\n 
+            4 clicks for MOUTH" << endl; break;
+
         case IDM_FILE_SAVE: {
             OPENFILENAME ofn; wchar_t sz[260] = { 0 };
             ZeroMemory(&ofn, sizeof(ofn));
@@ -1230,7 +1231,56 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
 
+        if (g_currentMode == MODE_FACE_DRAW)
+        {
+            static vector<Point> facePoints;
 
+            facePoints.push_back({ x, y });
+
+            cout << "Face Point " << facePoints.size() 
+            << " : (" << x << "," << y << ")" << endl;
+
+            if (facePoints.size() < 12)
+                break;
+
+            HDC hdc = GetDC(hwnd);
+            // ================= FACE =================
+        int R1 = (int)sqrt(
+            (facePoints[1].x - facePoints[0].x) *
+            (facePoints[1].x - facePoints[0].x)
+            +
+            (facePoints[1].y - facePoints[0].y) *
+            (facePoints[1].y - facePoints[0].y));
+
+        DrawCircleDirect(hdc, facePoints[0].x, facePoints[0].y, R1, g_drawColor);
+        // ================= LEFT EYE =================
+        int R2 = (int)sqrt(
+            (facePoints[3].x - facePoints[2].x) * 
+            (facePoints[3].x - facePoints[2].x)
+            +
+            (facePoints[3].y - facePoints[2].y) *
+            (facePoints[3].y - facePoints[2].y));
+    DrawCircleDirect(hdc, facePoints[2].x, facePoints[2].y, R2,g_drawColor);
+    // ================= RIGHT EYE =================
+    int R3 = (int)sqrt(
+        (facePoints[5].x - facePoints[4].x) *
+        (facePoints[5].x - facePoints[4].x)
+        +
+        (facePoints[5].y - facePoints[4].y) *
+        (facePoints[5].y - facePoints[4].y));
+    DrawCircleDirect(hdc, facePoints[4].x, facePoints[4].y, R3, g_drawColor);
+    // ================= NOSE =================
+    DrawLineDDA(hdc, facePoints[6].x, facePoints[6].y, facePoints[7].x, facePoints[7].y, g_drawColor);
+    // ================= MOUTH =================
+    DrawBezier(hdc, facePoints[8], facePoints[9], facePoints[10], facePoints[11], g_drawColor);
+
+    ReleaseDC(hwnd, hdc);
+    cout << "Face Drawn Successfully!" << endl;
+    facePoints.clear();
+
+    break;
+}
+       
         // --- Two-click shapes ---
         if (!g_firstClick) {
             g_startX = x; g_startY = y; g_firstClick = true;
@@ -1278,7 +1328,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 DrawCircleIterativePolar(hdc, g_startX, g_startY, R, g_drawColor);
                 cout << " -> Iterative Polar Circle R=" << R << endl;break;
             }
-
+            
             case MODE_CLIP_LINE:
                 DrawClipWindow(hdc);
                 CohenSuth(hdc, g_startX, g_startY, x, y,
@@ -1287,7 +1337,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             case MODE_CLIP_CIRCLE_LINE: {
                 LineCircleClip(hdc, g_clipXC, g_clipYC, g_startX, g_startY, x, y, g_clipR, g_drawColor);
                 break;
-            }
+            }    
             default: break;
             }
 
