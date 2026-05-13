@@ -99,6 +99,7 @@ enum DrawMode {
     MODE_MIDPOINT_ELLIPSE,          // Midpoint ellipse (4-way symmetry)
     // --- Fill algorithm ---
     MODE_FILL_CIRCLE_WITH_LINES,    // Fill a circle quadrant with radial lines
+    MODE_FILL_CIRCLE_WITH_CIRCLES,  // Fill a circle with concentric circles
     // --- Clipping algorithms ---
     MODE_CLIP_POINT,                // Test if a point is inside rectangular clip window
     MODE_CLIP_LINE,                 // Cohen-Sutherland line clipping against rectangle
@@ -852,6 +853,21 @@ static void FillCircleWithLines(cairo_t* cr, int xc, int yc, int R,
         double next_x = x_rel * ct - y_rel * st;
         y_rel = x_rel * st + y_rel * ct;
         x_rel = next_x;
+    }
+}
+
+// ============================================================================
+// ALGORITHM: FILL CIRCLE WITH CONCENTRIC CIRCLES
+// ============================================================================
+// Fills an existing circle by drawing concentric circles from the click
+// point's radius outward to the circle boundary.
+// User clicks inside an existing circle; the fill starts at the distance
+// from center to click and fills outward to the full radius.
+static void FillCircleWithCircles(cairo_t* cr, int xc, int yc, int startR, int endR, Color color) {
+    if (startR < 0) startR = 0;
+    if (endR < startR) return;
+    for (int r = startR; r <= endR; r++) {
+        DrawCircleDirect(cr, xc, yc, r, color);
     }
 }
 
@@ -1610,6 +1626,12 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
         break;
     }
 
+    case MODE_FILL_CIRCLE_WITH_CIRCLES: {
+        // (x1,y1) = center, x2 = startR, y2 = endR
+        FillCircleWithCircles(cr, s.x1, s.y1, s.x2, s.y2, s.color);
+        break;
+    }
+
     // ====================================================================
     // CLIPPING: POINT
     // ====================================================================
@@ -2043,6 +2065,30 @@ static gboolean on_button_press(GtkWidget* widget,
         return TRUE;
     }
 
+    // ---- Mode: Fill Circle with Concentric Circles (single click) ----
+    if (g_currentMode == MODE_FILL_CIRCLE_WITH_CIRCLES) {
+        int xc, yc, R;
+        if (!FindCircle(x, y, xc, yc, R)) {
+            cout << "  No circle found at that point." << endl;
+            return TRUE;
+        }
+
+        int startR = (int)sqrt(pow(x - xc, 2.0) + pow(y - yc, 2.0));
+
+        Shape s;
+        s.mode  = MODE_FILL_CIRCLE_WITH_CIRCLES;
+        s.color = g_drawColor;
+        s.x1    = xc;       // Circle center
+        s.y1    = yc;
+        s.x2    = startR;   // Starting radius (distance from center to click)
+        s.y2    = R;        // Outer radius (the circle's actual radius)
+        g_shapes.push_back(s);
+
+        gtk_widget_queue_draw(widget);
+        cout << "  Filling circle with concentric circles from r=" << startR << " to r=" << R << endl;
+        return TRUE;
+    }
+
     // ---- Mode: Flood Fill (single click) ----
     if (g_currentMode == MODE_FLOOD_FILL) {
         Shape s;
@@ -2460,6 +2506,13 @@ static void on_fill_circles_lines(GtkMenuItem*, gpointer) {
     cout << "\n[Fill Circle with Lines] Click on a quadrant of an existing circle." << endl;
 }
 
+static void on_fill_circles_circles(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_FILL_CIRCLE_WITH_CIRCLES;
+    g_firstClick  = false;
+    g_secondClick = false;
+    cout << "\n[Fill Circle with Circles] Click inside an existing circle to fill it with concentric circles." << endl;
+}
+
 // ---- Clipping Menu ----
 static void on_clip_point(GtkMenuItem*, gpointer) {
     g_currentMode = MODE_CLIP_POINT;
@@ -2777,6 +2830,11 @@ static GtkWidget* build_menu_bar() {
         g_signal_connect(fill_circ_item, "activate",
                          G_CALLBACK(on_fill_circles_lines), nullptr);
         gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), fill_circ_item);
+
+        GtkWidget* fill_circ_circ_item = gtk_menu_item_new_with_label("Fill Circle with Concentric Circles");
+        g_signal_connect(fill_circ_circ_item, "activate",
+                         G_CALLBACK(on_fill_circles_circles), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), fill_circ_circ_item);
 
         GtkWidget* fill_flood_item = gtk_menu_item_new_with_label("Flood Fill");
         g_signal_connect(fill_flood_item, "activate",

@@ -850,6 +850,16 @@ void DrawHappyFace(HDC hdc, int xc, int yc, int R, COLORREF color) {
 // ============================================================================
 // Cardinal Spline Curve
 // ============================================================================
+// FILL CIRCLE WITH CONCENTRIC CIRCLES
+// ============================================================================
+void FillCircleWithCircles(HDC hdc, int xc, int yc, int startR, int endR, COLORREF color) {
+    if (startR < 0) startR = 0;
+    if (endR < startR) return;
+    for (int r = startR; r <= endR; r++) {
+        DrawCircleDirect(hdc, xc, yc, r, color);
+    }
+}
+
 void DrawCardinalSpline(HDC hdc, Point p[], int n, double c, COLORREF color)
 {
     for (int i = 1; i < n - 2; i++)
@@ -1132,7 +1142,10 @@ void RenderShape(HDC hdc, const Shape& s) {
         DrawSadFace(hdc, s.x1, s.y1, R, s.color);
         break;
     }
-
+    case MODE_FILL_CIRCLE_WITH_CIRCLES: {
+        FillCircleWithCircles(hdc, s.x1, s.y1, s.x2, s.y2, s.color);
+        break;
+    }
     default: break;
     }
 }
@@ -1208,7 +1221,7 @@ HMENU CreateMainMenu() {
 
     HMENU hFill = CreatePopupMenu();
     AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_LINES, L"Fill Circle with Lines");
-    AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_CIRCLES, L"Fill Circle with Circles ");
+    AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_CIRCLES, L"Fill Circle with Concentric Circles");
     AppendMenu(hFill, MF_STRING, IDM_FILL_SQUARE_HERMITE, L"Fill Square with Hermite Curves");
     AppendMenu(hFill, MF_STRING, IDM_FILL_RECTANGLE_BEZIER, L"Fill Rectangle with Bezier Curves");
     AppendMenu(hFill, MF_STRING, IDM_CONVEX_FILL, L"Convex Fill");
@@ -1392,7 +1405,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         case IDM_FILL_CIRCLES_CIRCLES:
             g_currentMode = MODE_FILL_CIRCLE_WITH_CIRCLES; g_firstClick = false;
-            cout << " Fill Circle With Circles Mode -> Click a quarter of circle to fill it" << endl;
+            cout << " Fill Circle with Concentric Circles Mode -> Click inside an existing circle" << endl;
             break;
         case IDM_FILL_SQUARE_HERMITE:
             g_currentMode = MODE_FILL_SQUARE_HERMITE; g_firstClick = false;
@@ -1418,7 +1431,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode = MODE_NRFLOOD_FILL; g_firstClick = false;
             cout << " NON Recursive Flood Fill Mode ->" << endl;
             break;
-
             // Clipping Menu
         case IDM_CLIP_POINT:
             g_currentMode = MODE_CLIP_POINT; g_firstClick = false;
@@ -1634,6 +1646,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }           
             break;
         }            
+        if (g_currentMode == MODE_FILL_CIRCLE_WITH_CIRCLES) {
+            int xc, yc, R;
+            if (!FindCircle(x, y, xc, yc, R)) {
+                cout << "  No circle found at that point." << endl;
+                break;
+            }
+            int startR = (int)sqrt(pow(x - xc, 2.0) + pow(y - yc, 2.0));
+            HDC hdc = GetDC(hwnd);
+            FillCircleWithCircles(hdc, xc, yc, startR, R, g_drawColor);
+            ReleaseDC(hwnd, hdc);
+            Shape ns; ns.mode = MODE_FILL_CIRCLE_WITH_CIRCLES; ns.color = g_drawColor;
+            ns.x1 = xc; ns.y1 = yc; ns.x2 = startR; ns.y2 = R;
+            g_shapes.push_back(ns);
+            cout << "  Filling circle with concentric circles from r=" << startR << " to r=" << R << endl;
+            break;
+        }
         // --- Two-click shapes ---
         if (!g_firstClick) {
             g_startX = x; g_startY = y; g_firstClick = true;
