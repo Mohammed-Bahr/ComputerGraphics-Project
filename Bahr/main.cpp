@@ -92,7 +92,7 @@ vector<Shape>  g_shapes;
 vector<POINT>  g_polygonPoints;
 
 // Clip window boundaries
-int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400 , g_clipXC = 400 , g_clipYC = 300 , g_clipR = 100;
+int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400 , g_clipXC = 400 , g_clipYC = 300 , g_clipR = 150;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -1300,9 +1300,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     g_clipX1, g_clipY1, g_clipX2, g_clipY2, g_drawColor);
                 break;
             case MODE_CLIP_CIRCLE_LINE: {
-
-                
-            }
+                LineCircleClip(hdc, g_clipXC, g_clipYC, g_startX, g_startY, x, y, g_clipR, g_drawColor);
+                break;
+            }    
             default: break;
             }
 
