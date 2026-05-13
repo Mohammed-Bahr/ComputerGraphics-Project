@@ -79,8 +79,8 @@ enum DrawMode {
 
 DrawMode g_currentMode = MODE_NONE;
 // Mouse click state
-bool g_firstClick = false , g_secondClick = false;
-int  g_startX = 0, g_startY = 0 , g_X1 = 0 , g_Y1 = 0;
+bool g_firstClick = false, g_secondClick = false;
+int  g_startX = 0, g_startY = 0, g_X1 = 0, g_Y1 = 0;
 // Mouse click state
 struct Shape {
     DrawMode mode;
@@ -92,7 +92,7 @@ vector<Shape>  g_shapes;
 vector<POINT>  g_polygonPoints;
 
 // Clip window boundaries
-int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400;
+int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400 , g_clipXC = 400 , g_clipYC = 300 , g_clipR = 100;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -124,7 +124,9 @@ bool FindCircle(int x, int y, int& xc, int& yc, int& R) {
             if (CheckIFPointINCircle(R, xc, yc, x, y)) {
                 return true;
             }
-            
+            {
+
+            }
         }
     }
     return false;
@@ -255,6 +257,7 @@ void DrawLineMidpoint(HDC hdc, int x1, int y1, int x2, int y2, COLORREF c) {
         }
     }
 }
+
 // ============================================================================
 // PARAMETRIC LINE
 // ============================================================================
@@ -276,7 +279,6 @@ void DrawLineParametric(HDC hdc, int x1, int y1, int x2, int y2, COLORREF color)
         SetPixel(hdc, x, y, color);
     }
 }
-
 // ============================================================================
 // ALGORITHM 3: MODIFIED MIDPOINT CIRCLE (Faster Bresenham variant)
 // Reference: Circle Drawing Algorithms.md - Section 5.6
@@ -382,6 +384,7 @@ void DrawEllipseDirect(HDC hdc, int xc, int yc, int a, int b, COLORREF color)
 // ============================================================================
 // MIDPOINT ELLIPSE
 // ============================================================================
+
 void DrawEllipseMidpoint(HDC hdc , int xc , int yc , int a , int b , COLORREF color) {
     int x = 0, y = b;
     double d = 0.25 * a * a + b * b - a * a * b;
@@ -430,7 +433,7 @@ void FillCircleWithLines(HDC hdc, int xc, int yc, int R, double thetaS, double t
     if (thetaS == thetaE) return;
 
     int x, y;
-    for (double theta = thetaS; theta <= thetaE; theta += 0.01)
+    for (double theta = thetaS; theta <= thetaE; theta += (double)1.0/90.0)
     {
         x = xc + int(R * cos(theta));
         y = yc + int(R * sin(theta));
@@ -446,6 +449,16 @@ void DrawClipWindow(HDC hdc) {
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBr = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
     Rectangle(hdc, g_clipX1, g_clipY1, g_clipX2, g_clipY2);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBr);
+    DeleteObject(pen);
+}
+
+void DrawCircleClipWindow(HDC hdc) {
+    HPEN pen = CreatePen(PS_DASH, 1, RGB(255, 255, 0));
+    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+    HBRUSH oldBr = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    DrawCircleBresenham(hdc,g_clipXC,g_clipYC,g_clipR, RGB(255, 255, 0));
     SelectObject(hdc, oldPen);
     SelectObject(hdc, oldBr);
     DeleteObject(pen);
@@ -600,9 +613,9 @@ void PolygonClip(HDC hdc, vector<POINT>& pts,
 // ============================================================================
 void PointCircleClip(HDC hdc , int xc,int yc,int x,int y,int R, COLORREF color) {
     if (CheckIFPointINCircle(R, xc, yc, x, y)) {
-        for (int dy = -R; dy < R; dy++)
+        for (int dy = -2; dy <= 2; dy++)
         {
-            for (int dx = -R; dx < R; dx++)
+            for (int dx = -2; dx <= 2; dx++)
             {
                 SetPixel(hdc,xc + dx, yc + dy, color);
             }
@@ -643,9 +656,6 @@ void RenderShape(HDC hdc, const Shape& s) {
     case MODE_MIDPOINT_LINE:
         DrawLineMidpoint(hdc, s.x1, s.y1, s.x2, s.y2, s.color);
         break;
-    case MODE_PARA_LINE:
-        DrawLineParametric(hdc, s.x1, s.y1, s.x2, s.y2, s.color);
-        break;  
     case MODE_MODIFIED_MIDPOINT_CIRCLE: {
         int R = (int)sqrt((double)(s.x2 - s.x1) * (s.x2 - s.x1) + (double)(s.y2 - s.y1) * (s.y2 - s.y1));
         DrawCircleModifiedMidpoint(hdc, s.x1, s.y1, R, s.color);
@@ -707,7 +717,6 @@ HMENU CreateMainMenu() {
     AppendMenu(hPref, MF_STRING, IDM_PREFERENCES_BG_WHITE, L"Background: white");
     AppendMenu(hPref, MF_STRING, IDM_PREFERENCES_CHOOSE_COLOR, L"Choose Drawing Color...");
     AppendMenu(hPref, MF_SEPARATOR, 0, NULL);
-    
     HMENU hCur = CreatePopupMenu();
     AppendMenu(hCur, MF_STRING, IDM_PREFERENCES_CURSOR_ARROW, L"Arrow");
     AppendMenu(hCur, MF_STRING, IDM_PREFERENCES_CURSOR_CROSS, L"Crosshair");
@@ -878,7 +887,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         case IDM_ELLIPSE_MIDPOINT:
             g_currentMode = MODE_MIDPOINT_ELLIPSE; g_firstClick = false;
-            cout << "Midpoint Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
+            cout << "Midpoint Ellipse Mode -> Click center , then click a point to focus the ellipse" << endl;
             break;
 
             // Filling Menu
@@ -886,7 +895,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode = MODE_FILL_CIRCLE_WITH_LINES; g_firstClick = false;
             cout << " Fill Circle With Lines Mode -> Click a quarter of circle to fill it" << endl;
             break;
-
             // Clipping Menu
         case IDM_CLIP_POINT:
             g_currentMode = MODE_CLIP_POINT; g_firstClick = false;
@@ -902,7 +910,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             InvalidateRect(hwnd, NULL, TRUE);
             cout << "Mode: Polygon Clipping - LClick to add, RClick to finish" << endl; break;
         case IDM_CIRCLE_CLIP_POINT:
-            g_currentMode = MODE_CLIP_CIRCLE_POINT; g_firstClick = false , g_secondClick = false;
+            g_currentMode = MODE_CLIP_CIRCLE_POINT; g_firstClick = false;
             g_polygonPoints.clear();
             InvalidateRect(hwnd, NULL, TRUE);
             cout << "Circle Point Clipping Mode -> click a point" << endl; break;
@@ -943,7 +951,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_LBUTTONDOWN: {
         int x = LOWORD(lParam);
-        int y = HIWORD(lParam);
+        int   y = HIWORD(lParam);
         if (g_currentMode == MODE_NONE) {
             cout << "Please select a drawing mode from the menu first." << endl;
             break;
@@ -966,9 +974,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "  Point added (" << x << "," << y << ")" << endl;
             break;
         }
-        
 
-        if (g_currentMode == MODE_MIDPOINT_ELLIPSE || 
+        if (g_currentMode == MODE_MIDPOINT_ELLIPSE ||
             g_currentMode == MODE_DIRECT_ELLIPSE) {
             if (!g_firstClick)
             {
@@ -983,17 +990,63 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 int b = (int)sqrt(pow(g_X1 - g_startX, 2) + pow(g_Y1 - g_startY, 2));
                 int a = (int)sqrt(pow(x - g_startX, 2) + pow(y - g_startY, 2));
                 HDC hdc = GetDC(hwnd);
-                if(g_currentMode == MODE_MIDPOINT_ELLIPSE)
+                if (g_currentMode == MODE_MIDPOINT_ELLIPSE)
                     DrawEllipseMidpoint(hdc, g_startX, g_startY, a, b, g_drawColor);
-                else{
+                else {
                     DrawEllipseDirect(hdc, g_startX, g_startY, a, b, g_drawColor);
-                }   
+                }
                 ReleaseDC(hwnd, hdc);
                 cout << "Ellipse drawn with two radii a =" << a << " b=" << b << endl;
                 g_firstClick = false, g_secondClick = false;
             }
             break;
         }
+        if (g_currentMode == MODE_CLIP_CIRCLE_POINT)
+        {
+            HDC hdc = GetDC(hwnd);
+            DrawCircleClipWindow(hdc);
+            PointCircleClip(hdc,g_clipXC,g_clipYC,x,y,g_clipR,g_drawColor);
+            ReleaseDC(hwnd, hdc);
+            break;
+        }
+
+        if (g_currentMode == MODE_FILL_CIRCLE_WITH_LINES) {
+            int xc, yc, R;
+
+            if (!FindCircle(x, y, xc, yc, R))
+            {
+                cout << "there are no circle exist to fill" << endl; break;
+            }
+
+            double dx = x - xc, dy = y - yc;
+            double angle = atan2(dy, dx), PI = 3.14159265;
+            double thetaS, thetaE;
+            string Q;
+
+            if (angle >= 0 && angle < PI / 2)
+            {
+                thetaS = 0, thetaE = PI / 2, Q = "1st";
+            }
+            else if (angle >= PI / 2 && angle < PI)
+            {
+                thetaS = PI / 2, thetaE = PI, Q = "2nd";
+            }
+            else if (angle >= -PI && angle < -PI / 2)
+            {
+                thetaS = PI, thetaE = 3 * PI / 2, Q = "3th";
+            }
+            else {
+                thetaS = 3 * PI / 2, thetaE = 2 * PI, Q = "4th";
+            }
+            HDC hdc = GetDC(hwnd);
+            FillCircleWithLines(hdc, xc, yc, R, thetaS, thetaE, g_drawColor);
+            ReleaseDC(hwnd, hdc);
+
+            cout << "Filling Circle the " << Q << "quarter" << endl;
+
+            break;
+        }
+
 
         // --- Two-click shapes ---
         if (!g_firstClick) {
@@ -1017,7 +1070,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             case MODE_PARA_LINE:
                 DrawLineParametric(hdc, g_startX, g_startY, x, y, g_drawColor);
                 cout << "  -> Parametric Line drawn." << endl; break;
-
             case MODE_MODIFIED_MIDPOINT_CIRCLE: {
                 int R = (int)sqrt((double)(x - g_startX) * (x - g_startX) + (double)(y - g_startY) * (y - g_startY));
                 DrawCircleModifiedMidpoint(hdc, g_startX, g_startY, R, g_drawColor);
@@ -1043,42 +1095,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 DrawCircleIterativePolar(hdc, g_startX, g_startY, R, g_drawColor);
                 cout << " -> Iterative Polar Circle R=" << R << endl;break;
             }
-            case MODE_FILL_CIRCLE_WITH_LINES: {
-              
-                int xc, yc, R;
-
-                if (!FindCircle(x,y,xc,yc,R))
-                {
-                    cout << "there are no circle exist to fill" << endl; break;
-                }
-
-                double dx = x - xc, dy = y - yc;
-                double angle = atan2(dy, dx), PI = 3.14159265;
-                double thetaS, thetaE;
-                string Q;
-
-                if (angle >= 0 && angle < PI / 2)
-                {
-                    thetaS = 0, thetaE = PI / 2 , Q = "1st";
-                }
-                else if (angle >= PI / 2 && angle < PI)
-                {
-                    thetaS = PI / 2, thetaE = PI, Q = "2nd";
-                }
-                else if (angle >= -PI && angle < -PI / 2)
-                {
-                    thetaS = PI, thetaE = 3*PI / 2, Q = "3th";
-                }
-                else {
-                    thetaS = 3 * PI/2, thetaE = 2 * PI, Q = "4th";
-                }
-
-                FillCircleWithLines(hdc, xc, yc, R, thetaS, thetaE, g_drawColor);
-
-                cout << "Filling Circle the " << Q << "quarter" << endl;
-
-                break;
-            }
+            
             case MODE_CLIP_LINE:
                 DrawClipWindow(hdc);
                 CohenSuth(hdc, g_startX, g_startY, x, y,
@@ -1086,6 +1103,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 break;
             case MODE_CLIP_CIRCLE_LINE: {
 
+                
             }
             default: break;
             }
@@ -1130,6 +1148,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode == MODE_CLIP_LINE ||
             g_currentMode == MODE_CLIP_POLYGON)
             DrawClipWindow(hdc);
+        if (g_currentMode == MODE_CLIP_CIRCLE_POINT ||
+            g_currentMode == MODE_CLIP_CIRCLE_LINE ) {
+            DrawCircleClipWindow(hdc);
+        }
         EndPaint(hwnd, &ps);
         break;
     }
