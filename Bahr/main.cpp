@@ -1134,7 +1134,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "Direct Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
             break;
         case IDM_ELLIPSE_POLAR:
-            g_currentMode = MODE_DIRECT_ELLIPSE; g_firstClick = false;
+            g_currentMode = MODE_POLAR_ELLIPSE; g_firstClick = false;
             cout << "Polar Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
             break;
         case IDM_ELLIPSE_MIDPOINT:
@@ -1279,6 +1279,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             for (int d = -2; d <= 2; d++) { SetPixel(hdc, x + d, y, g_drawColor); SetPixel(hdc, x, y + d, g_drawColor); }
             ReleaseDC(hwnd, hdc);
             cout << "  Point added (" << x << "," << y << ")" << endl;
+            break;
+        }
+        if (g_currentMode == MODE_CARDINAL_SPLINE) {
+            POINT pt = { x,y }; g_polygonPoints.push_back(pt);
+            HDC hdc = GetDC(hwnd);
+            SetPixel(hdc, x, y, g_drawColor);
+            ReleaseDC(hwnd, hdc);
+            cout << "Spline Point added(" << x << "," << y << ")" << endl;
             break;
         }
 
@@ -1450,6 +1458,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             DrawClipWindow(hdc,false);
             PolygonClip(hdc, g_polygonPoints,
                 g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, g_drawColor);
+            ReleaseDC(hwnd, hdc);
+            g_polygonPoints.clear();
+        }
+        if (g_currentMode == MODE_CARDINAL_SPLINE && g_polygonPoints.size() >= 4) {
+            HDC hdc = GetDC(hwnd);
+            vector<Point> splinepts;
+            for (auto& p : g_polygonPoints) {
+                splinepts.push_back({p.x,p.y });
+            }
+            DrawCardinalSpline(hdc, splinepts.data(), (int)splinepts.size(), 0.5, g_drawColor);
             ReleaseDC(hwnd, hdc);
             g_polygonPoints.clear();
         }
