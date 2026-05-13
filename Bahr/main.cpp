@@ -1260,26 +1260,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             +
             (facePoints[3].y - facePoints[2].y) *
             (facePoints[3].y - facePoints[2].y));
-    DrawCircleDirect(hdc, facePoints[2].x, facePoints[2].y, R2,g_drawColor);
-    // ================= RIGHT EYE =================
-    int R3 = (int)sqrt(
-        (facePoints[5].x - facePoints[4].x) *
-        (facePoints[5].x - facePoints[4].x)
-        +
-        (facePoints[5].y - facePoints[4].y) *
-        (facePoints[5].y - facePoints[4].y));
-    DrawCircleDirect(hdc, facePoints[4].x, facePoints[4].y, R3, g_drawColor);
-    // ================= NOSE =================
-    DrawLineDDA(hdc, facePoints[6].x, facePoints[6].y, facePoints[7].x, facePoints[7].y, g_drawColor);
-    // ================= MOUTH =================
-    DrawBezier(hdc, facePoints[8], facePoints[9], facePoints[10], facePoints[11], g_drawColor);
+        DrawCircleDirect(hdc, facePoints[2].x, facePoints[2].y, R2,g_drawColor);
+        // ================= RIGHT EYE =================
+        int R3 = (int)sqrt(
+            (facePoints[5].x - facePoints[4].x) *
+            (facePoints[5].x - facePoints[4].x)
+            +
+            (facePoints[5].y - facePoints[4].y) *
+            (facePoints[5].y - facePoints[4].y));
+        DrawCircleDirect(hdc, facePoints[4].x, facePoints[4].y, R3, g_drawColor);
+        // ================= NOSE =================
+        DrawLineDDA(hdc, facePoints[6].x, facePoints[6].y, facePoints[7].x, facePoints[7].y, g_drawColor);
+        // ================= MOUTH =================
+        DrawBezier(hdc, facePoints[8], facePoints[9], facePoints[10], facePoints[11], g_drawColor);
 
-    ReleaseDC(hwnd, hdc);
-    cout << "Face Drawn Successfully!" << endl;
-    facePoints.clear();
+        ReleaseDC(hwnd, hdc);
+        cout << "Face Drawn Successfully!" << endl;
+        
+        facePoints.clear();
 
-    break;
-}
+        break;
+    }
        
         // --- Two-click shapes ---
         if (!g_firstClick) {
