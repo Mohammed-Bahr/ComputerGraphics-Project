@@ -1,3 +1,18 @@
+
+/*
+ * Computer Graphics Term Project - Person 3 Implementation
+ *
+ * Responsibilities:
+ * - Change background color (Preferences menu)
+ * - Choose shape drawing color (Preferences menu)
+ * - DDA Line algorithm
+ * - Midpoint Line algorithm (Bresenham's)
+ * - Modified Midpoint Circle algorithm (Faster Bresenham variant)
+ * - Change mouse pointer (Preferences menu)
+ *
+ * All drawing uses mouse-only input (no keyboard)
+ */
+
 #include <windows.h>
 #include <cmath>
 #include <vector>
@@ -26,9 +41,12 @@ using namespace std;
 #define IDM_CLIP_POINT                 501
 #define IDM_CLIP_LINE                  502
 #define IDM_CLIP_POLYGON               503
-#define IDM_CIRCLE_CLIP_POINT          504
-#define IDM_CIRCLE_CLIP_LINE           505
-#define IDM_ELLIPSE_DIRECT             602
+#define IDM_SQUARE_CLIP_POINT          504
+#define IDM_SQUARE_CLIP_LINE           505
+#define IDM_CIRCLE_CLIP_POINT          506
+#define IDM_CIRCLE_CLIP_LINE           507
+#define IDM_ELLIPSE_DIRECT             601
+#define IDM_ELLIPSE_POLAR              602
 #define IDM_ELLIPSE_MIDPOINT           603
 #define IDM_FILL_CIRCLES_LINES         701
 #define IDM_HAPPY_FACE                 801
@@ -54,12 +72,15 @@ enum DrawMode {
     MODE_POLAR_CIRCLE,
     MODE_ITERATIVE_POLAR_CIRCLE,
     MODE_DIRECT_ELLIPSE,
+    MODE_POLAR_ELLIPSE,
     MODE_MIDPOINT_ELLIPSE,
     MODE_BRESENHAM_CIRCLE,
     MODE_FILL_CIRCLE_WITH_LINES,
     MODE_CLIP_POINT,
     MODE_CLIP_LINE,
     MODE_CLIP_POLYGON,
+    MODE_SQUARE_CLIP_POINT,
+    MODE_SQUARE_CLIP_LINE,
     MODE_CLIP_CIRCLE_POINT,
     MODE_CLIP_CIRCLE_LINE,
     MODE_HAPPY_FACE,
@@ -81,7 +102,8 @@ vector<Shape>  g_shapes;
 vector<POINT>  g_polygonPoints;
 
 // Clip window boundaries
-int g_clipX1 = 150, g_clipY1 = 150, g_clipX2 = 600, g_clipY2 = 400 , g_clipXC = 400 , g_clipYC = 300 , g_clipR = 150;
+int g_clipX1 = 150, g_clipY1 = 150, g_RECclipX2 = 600,g_SQUclipX2 = 400, g_clipY2 = 400,
+g_CircleclipXC = 400, g_CircleclipYC = 300, g_clipR = 150;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -325,8 +347,8 @@ void DrawCircleBresenham(HDC hdc, int xc, int yc, int R, COLORREF color) {
 // ============================================================================
 // POLAR CIRCLE
 // ============================================================================
-void DrawCirclePolar(HDC hdc,int xc,int yc, int R,COLORREF color) {
-    int x = R ,y = 0;
+void DrawCirclePolar(HDC hdc, int xc, int yc, int R, COLORREF color) {
+    int x = R, y = 0;
     double theta = 0, dtheta = 1.0 / R;
     Draw8Points(hdc, xc, yc, x, y, color);
     while (x > y) {
@@ -374,7 +396,7 @@ void DrawEllipseDirect(HDC hdc, int xc, int yc, int a, int b, COLORREF color)
 // MIDPOINT ELLIPSE
 // ============================================================================
 
-void DrawEllipseMidpoint(HDC hdc , int xc , int yc , int a , int b , COLORREF color) {
+void DrawEllipseMidpoint(HDC hdc, int xc, int yc, int a, int b, COLORREF color) {
     int x = 0, y = b;
     double d = 0.25 * a * a + b * b - a * a * b;
     double dx = 2 * b * b * x, dy = 2 * a * a * y;
@@ -422,7 +444,7 @@ void FillCircleWithLines(HDC hdc, int xc, int yc, int R, double thetaS, double t
     if (thetaS == thetaE) return;
 
     int x, y;
-    for (double theta = thetaS; theta <= thetaE; theta += (double)1.0/90.0)
+    for (double theta = thetaS; theta <= thetaE; theta += (double)1.0 / 90.0)
     {
         x = xc + int(R * cos(theta));
         y = yc + int(R * sin(theta));
@@ -433,11 +455,16 @@ void FillCircleWithLines(HDC hdc, int xc, int yc, int R, double thetaS, double t
 // ============================================================================
 // CLIP WINDOW DRAWING
 // ============================================================================
-void DrawClipWindow(HDC hdc) {
+void DrawClipWindow(HDC hdc, bool opt) {
     HPEN pen = CreatePen(PS_DASH, 1, RGB(255, 255, 0));
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBr = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, g_clipX1, g_clipY1, g_clipX2, g_clipY2);
+    if (!opt) {
+        Rectangle(hdc, g_clipX1, g_clipY1, g_RECclipX2, g_clipY2);
+    }
+    else {
+        Rectangle(hdc, g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2);
+    }
     SelectObject(hdc, oldPen);
     SelectObject(hdc, oldBr);
     DeleteObject(pen);
@@ -447,7 +474,7 @@ void DrawCircleClipWindow(HDC hdc) {
     HPEN pen = CreatePen(PS_DASH, 1, RGB(255, 255, 0));
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBr = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    DrawCircleBresenham(hdc,g_clipXC,g_clipYC,g_clipR, RGB(255, 255, 0));
+    DrawCircleBresenham(hdc, g_CircleclipXC, g_CircleclipYC, g_clipR, RGB(255, 255, 0));
     SelectObject(hdc, oldPen);
     SelectObject(hdc, oldBr);
     DeleteObject(pen);
@@ -600,7 +627,7 @@ void PolygonClip(HDC hdc, vector<POINT>& pts,
 // ============================================================================
 // POINT CIRCLE CLIPPING
 // ============================================================================
-void PointCircleClip(HDC hdc , int xc,int yc,int x,int y,int R, COLORREF color) {
+void PointCircleClip(HDC hdc, int xc, int yc, int x, int y, int R, COLORREF color) {
     if (CheckIFPointINCircle(R, xc, yc, x, y)) {
         for (int dy = -2; dy <= 2; dy++)
         {
@@ -614,18 +641,18 @@ void PointCircleClip(HDC hdc , int xc,int yc,int x,int y,int R, COLORREF color) 
 // ============================================================================
 // LINE CIRCLE CLIPPING
 // ============================================================================
-void LineCircleClip(HDC hdc, int xc, int yc, int x1, int y1,int x2,int y2, int R, COLORREF color) {
+void LineCircleClip(HDC hdc, int xc, int yc, int x1, int y1, int x2, int y2, int R, COLORREF color) {
     int dx = x2 - x1;
     int dy = y2 - y1;
 
     int steps = max(abs(dx), abs(dy));
 
-    double xInc = (double)dx / steps , yInc = (double)dy / steps;
+    double xInc = (double)dx / steps, yInc = (double)dy / steps;
     double x = x1, y = y1;
 
     for (int i = 0; i <= steps; i++)
     {
-        if (CheckIFPointINCircle(R,xc,yc,round(x),round(y)))
+        if (CheckIFPointINCircle(R, xc, yc, round(x), round(y)))
         {
             SetPixel(hdc, round(x), round(y), color);
         }
@@ -633,16 +660,6 @@ void LineCircleClip(HDC hdc, int xc, int yc, int x1, int y1,int x2,int y2, int R
         y += yInc;
     }
 
-}
-
-
-
-void Draw4Points(HDC hdc, int xc, int yc, int x, int y, COLORREF c)
-{
-    SetPixel(hdc, xc + x, yc + y, c);
-    SetPixel(hdc, xc - x, yc + y, c);
-    SetPixel(hdc, xc - x, yc - y, c);
-    SetPixel(hdc, xc + x, yc - y, c);
 }
 
 void EllipsePolar(HDC hdc, int xc, int yc, int a, int b, COLORREF c)
@@ -683,135 +700,79 @@ Point Bezier(Point p0, Point p1, Point p2, Point p3, double t)
 
 void DrawBezier(HDC hdc, Point p0, Point p1, Point p2, Point p3, COLORREF c)
 {
-    for(double t = 0; t <= 1; t += 0.001)
+    for (double t = 0; t <= 1; t += 0.001)
     {
-        Point p = Bezier(p0,p1,p2,p3,t);
+        Point p = Bezier(p0, p1, p2, p3, t);
 
-        SetPixel(hdc,p.x,p.y,c);
+        SetPixel(hdc, p.x, p.y, c);
     }
 }
 
-void FillRectangleBezier(HDC hdc,int left,int top,int right,int bottom,COLORREF c)
+void FillRectangleBezier(HDC hdc, int left, int top, int right, int bottom, COLORREF c)
 {
-    for(int y = top; y <= bottom; y += 5)
+    for (int y = top; y <= bottom; y += 5)
     {
-        Point p0 = {left,y};
-        Point p1 = {left+50,y+20};
-        Point p2 = {right-50,y-20};
-        Point p3 = {right,y};
+        Point p0 = { left,y };
+        Point p1 = { left + 50,y + 20 };
+        Point p2 = { right - 50,y - 20 };
+        Point p3 = { right,y };
 
-        DrawBezier(hdc,p0,p1,p2,p3,c);
+        DrawBezier(hdc, p0, p1, p2, p3, c);
     }
 }
 
 Point Hermite(Point p0, Point t0, Point p1, Point t1, double t)
 {
-    double h1 = 2*t*t*t - 3*t*t + 1;
-    double h2 = -2*t*t*t + 3*t*t;
-    double h3 = t*t*t - 2*t*t + t;
-    double h4 = t*t*t - t*t;
+    double h1 = 2 * t * t * t - 3 * t * t + 1;
+    double h2 = -2 * t * t * t + 3 * t * t;
+    double h3 = t * t * t - 2 * t * t + t;
+    double h4 = t * t * t - t * t;
 
     Point p;
 
-    p.x = h1*p0.x + h2*p1.x + h3*t0.x + h4*t1.x;
-    p.y = h1*p0.y + h2*p1.y + h3*t0.y + h4*t1.y;
+    p.x = h1 * p0.x + h2 * p1.x + h3 * t0.x + h4 * t1.x;
+    p.y = h1 * p0.y + h2 * p1.y + h3 * t0.y + h4 * t1.y;
 
     return p;
 }
 
 void DrawHermite(HDC hdc, Point p0, Point t0, Point p1, Point t1, COLORREF c)
 {
-    for(double t=0; t<=1; t+=0.001)
+    for (double t = 0; t <= 1; t += 0.001)
     {
-        Point p = Hermite(p0,t0,p1,t1,t);
+        Point p = Hermite(p0, t0, p1, t1, t);
 
-        SetPixel(hdc,p.x,p.y,c);
+        SetPixel(hdc, p.x, p.y, c);
     }
 }
 
-void FillSquareHermite(HDC hdc,int left,int top,int size,COLORREF c)
+void FillSquareHermite(HDC hdc, int left, int top, int size, COLORREF c)
 {
-    for(int x=left; x<=left+size; x+=5)
+    for (int x = left; x <= left + size; x += 5)
     {
-        Point p0 = {x,top};
-        Point p1 = {x,top+size};
+        Point p0 = { x,top };
+        Point p1 = { x,top + size };
 
-        Point t0 = {50,0};
-        Point t1 = {-50,0};
+        Point t0 = { 50,0 };
+        Point t1 = { -50,0 };
 
-        DrawHermite(hdc,p0,t0,p1,t1,c);
+        DrawHermite(hdc, p0, t0, p1, t1, c);
     }
 }
 
-void FillRectangleBezier(HDC hdc,int left,int top,int right,int bottom,COLORREF c)
+void FloodFillRec(HDC hdc, int x, int y, COLORREF fillColor, COLORREF borderColor)
 {
-    for(int y = top; y <= bottom; y += 5)
+    COLORREF c = GetPixel(hdc, x, y);
+
+    if (c != borderColor && c != fillColor)
     {
-        Point p0 = {left,y};
-        Point p1 = {left+50,y+20};
-        Point p2 = {right-50,y-20};
-        Point p3 = {right,y};
+        SetPixel(hdc, x, y, fillColor);
 
-        DrawBezier(hdc,p0,p1,p2,p3,c);
+        FloodFillRec(hdc, x + 1, y, fillColor, borderColor);
+        FloodFillRec(hdc, x - 1, y, fillColor, borderColor);
+        FloodFillRec(hdc, x, y + 1, fillColor, borderColor);
+        FloodFillRec(hdc, x, y - 1, fillColor, borderColor);
     }
-}
-
-
-void FloodFillRec(HDC hdc,int x,int y,COLORREF fillColor,COLORREF borderColor)
-{
-    COLORREF c = GetPixel(hdc,x,y);
-
-    if(c != borderColor && c != fillColor)
-    {
-        SetPixel(hdc,x,y,fillColor);
-
-        FloodFillRec(hdc,x+1,y,fillColor,borderColor);
-        FloodFillRec(hdc,x-1,y,fillColor,borderColor);
-        FloodFillRec(hdc,x,y+1,fillColor,borderColor);
-        FloodFillRec(hdc,x,y-1,fillColor,borderColor);
-    }
-}
-
-
-void FloodFillRec(HDC hdc,int x,int y,COLORREF fillColor,COLORREF borderColor)
-{
-    COLORREF c = GetPixel(hdc,x,y);
-
-    if(c != borderColor && c != fillColor)
-    {
-        SetPixel(hdc,x,y,fillColor);
-
-        FloodFillRec(hdc,x+1,y,fillColor,borderColor);
-        FloodFillRec(hdc,x-1,y,fillColor,borderColor);
-        FloodFillRec(hdc,x,y+1,fillColor,borderColor);
-        FloodFillRec(hdc,x,y-1,fillColor,borderColor);
-    }
-}
-
-// ============================================================================
-// DRAW HAPPY FACE (Auto-proportioned, 2 clicks)
-// ============================================================================
-void DrawHappyFace(HDC hdc, int xc, int yc, int R, COLORREF color) {
-    if (R <= 0) return;
-
-    DrawCircleDirect(hdc, xc, yc, R, color);
-
-    int eyeR = max(1, R / 8);
-    int eyeOffX = R / 3;
-    int eyeY = yc - R / 4;
-
-    DrawCircleDirect(hdc, xc - eyeOffX, eyeY, eyeR, color);
-    DrawCircleDirect(hdc, xc + eyeOffX, eyeY, eyeR, color);
-
-    DrawLineDDA(hdc, xc, eyeY + eyeR, xc, yc + R / 6, color);
-
-    int mouthY = yc + R / 3;
-    int mouthW = R * 2 / 3;
-    Point m0 = {xc - mouthW, mouthY};
-    Point m3 = {xc + mouthW, mouthY};
-    Point m1 = {xc - mouthW / 2, mouthY - R / 4};
-    Point m2 = {xc + mouthW / 2, mouthY - R / 4};
-    DrawBezier(hdc, m0, m1, m2, m3, color);
 }
 
 // ============================================================================
@@ -833,26 +794,53 @@ void DrawSadFace(HDC hdc, int xc, int yc, int R, COLORREF color) {
 
     int mouthY = yc + R / 3;
     int mouthW = R * 2 / 3;
-    Point m0 = {xc - mouthW, mouthY};
-    Point m3 = {xc + mouthW, mouthY};
-    Point m1 = {xc - mouthW / 2, mouthY + R / 4};
-    Point m2 = {xc + mouthW / 2, mouthY + R / 4};
+    Point m0 = { xc - mouthW, mouthY };
+    Point m3 = { xc + mouthW, mouthY };
+    Point m1 = { xc - mouthW / 2, mouthY - R / 4 };
+    Point m2 = { xc + mouthW / 2, mouthY - R / 4 };
     DrawBezier(hdc, m0, m1, m2, m3, color);
 }
 
+// ============================================================================
+// DRAW HAPPY FACE (Auto-proportioned, 2 clicks)
+// ============================================================================
+void DrawHappyFace(HDC hdc, int xc, int yc, int R, COLORREF color) {
+    if (R <= 0) return;
+
+    DrawCircleDirect(hdc, xc, yc, R, color);
+
+    int eyeR = max(1, R / 8);
+    int eyeOffX = R / 3;
+    int eyeY = yc - R / 4;
+
+    DrawCircleDirect(hdc, xc - eyeOffX, eyeY, eyeR, color);
+    DrawCircleDirect(hdc, xc + eyeOffX, eyeY, eyeR, color);
+
+    DrawLineDDA(hdc, xc, eyeY + eyeR, xc, yc + R / 6, color);
+
+    int mouthY = yc + R / 3;
+    int mouthW = R * 2 / 3;
+    Point m0 = { xc - mouthW, mouthY };
+    Point m3 = { xc + mouthW, mouthY };
+    Point m1 = { xc - mouthW / 2, mouthY + R / 4 };
+    Point m2 = { xc + mouthW / 2, mouthY + R / 4 };
+    DrawBezier(hdc, m0, m1, m2, m3, color);
+}
+
+
 void DrawCardinalSpline(HDC hdc, Point p[], int n, double c, COLORREF color)
 {
-    for(int i=1; i<n-2; i++)
+    for (int i = 1; i < n - 2; i++)
     {
         Point t1, t2;
 
-        t1.x = c * (p[i+1].x - p[i-1].x);
-        t1.y = c * (p[i+1].y - p[i-1].y);
+        t1.x = c * (p[i + 1].x - p[i - 1].x);
+        t1.y = c * (p[i + 1].y - p[i - 1].y);
 
-        t2.x = c * (p[i+2].x - p[i].x);
-        t2.y = c * (p[i+2].y - p[i].y);
+        t2.x = c * (p[i + 2].x - p[i].x);
+        t2.y = c * (p[i + 2].y - p[i].y);
 
-        DrawHermite(hdc,p[i],t1,p[i+1],t2,color);
+        DrawHermite(hdc, p[i], t1, p[i + 1], t2, color);
     }
 }
 
@@ -885,9 +873,9 @@ void RenderShape(HDC hdc, const Shape& s) {
         break;
     }
     case MODE_CLIP_LINE:
-        DrawClipWindow(hdc);
+        DrawClipWindow(hdc,false);
         CohenSuth(hdc, s.x1, s.y1, s.x2, s.y2,
-            g_clipX1, g_clipY1, g_clipX2, g_clipY2, s.color);
+            g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, s.color);
         break;
     case MODE_HAPPY_FACE: {
         int R = (int)sqrt((double)(s.x2 - s.x1) * (s.x2 - s.x1) + (double)(s.y2 - s.y1) * (s.y2 - s.y1));
@@ -958,12 +946,13 @@ HMENU CreateMainMenu() {
     AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_MODIFIED_MIDPOINT, L"Modified Midpoint");
     AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_DIRECT, L"Direct Equation");
     AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_BRESENHAM, L"Midpoint (Bresenham)");
-    AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_POLAR ,L"Polar Circle");
+    AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_POLAR, L"Polar Circle");
     AppendMenu(hCirc, MF_STRING, IDM_CIRCLES_POLAR_ITERATIVE, L"Iterative Polar Circle");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hCirc, L"Circles");
 
     HMENU hEllipse = CreatePopupMenu();
     AppendMenu(hEllipse, MF_STRING, IDM_ELLIPSE_DIRECT, L"DIRECT Ellipse");
+    AppendMenu(hEllipse, MF_STRING, IDM_ELLIPSE_POLAR, L"Polar Ellipse");
     AppendMenu(hEllipse, MF_STRING, IDM_ELLIPSE_MIDPOINT, L"Midpoint Ellipse");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hEllipse, L"Ellipses");
 
@@ -975,6 +964,8 @@ HMENU CreateMainMenu() {
     AppendMenu(hClip, MF_STRING, IDM_CLIP_POINT, L"Rectangular Point Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CLIP_LINE, L"Rectangular Line Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CLIP_POLYGON, L"Rectangular Polygon Clipping");
+    AppendMenu(hClip, MF_STRING, IDM_SQUARE_CLIP_POINT, L"Square Point Clipping");
+    AppendMenu(hClip, MF_STRING, IDM_SQUARE_CLIP_LINE, L"Square Line Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_POINT, L"Circular Point Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_LINE, L"Circular Line Clipping");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hClip, L"Clipping");
@@ -1113,6 +1104,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode = MODE_DIRECT_ELLIPSE; g_firstClick = false;
             cout << "Direct Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
             break;
+        case IDM_ELLIPSE_POLAR:
+            g_currentMode = MODE_DIRECT_ELLIPSE; g_firstClick = false;
+            cout << "Polar Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
+            break;
         case IDM_ELLIPSE_MIDPOINT:
             g_currentMode = MODE_MIDPOINT_ELLIPSE; g_firstClick = false;
             cout << "Midpoint Ellipse Mode -> Click center , then click a point to focus the ellipse" << endl;
@@ -1137,6 +1132,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_polygonPoints.clear();
             InvalidateRect(hwnd, NULL, TRUE);
             cout << "Mode: Polygon Clipping - LClick to add, RClick to finish" << endl; break;
+        case IDM_SQUARE_CLIP_POINT:
+            g_currentMode = MODE_SQUARE_CLIP_POINT; g_firstClick = false;
+            g_polygonPoints.clear();
+            InvalidateRect(hwnd, NULL, TRUE);
+            cout << "Square Point Clipping Mode -> click a point" << endl; break;
+        case IDM_SQUARE_CLIP_LINE:
+            g_currentMode = MODE_SQUARE_CLIP_LINE; g_firstClick = false;
+            cout << "Square Line Clipping Mode -> click 2 points" << endl; break;
         case IDM_CIRCLE_CLIP_POINT:
             g_currentMode = MODE_CLIP_CIRCLE_POINT; g_firstClick = false;
             g_polygonPoints.clear();
@@ -1153,20 +1156,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "Sad Face Mode -> Click center, then a radius point" << endl; break;
 
         case IDM_FILE_SAVE: {
-            OPENFILENAME ofn; wchar_t sz[260] = { 0 };
-            ZeroMemory(&ofn, sizeof(ofn));
-            ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = hwnd;
-            ofn.lpstrFile = sz; ofn.nMaxFile = 260;
-            ofn.lpstrFilter = L"Project Files (*.bin)\0*.bin\0All\0*.*\0";
-            ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
-            if (GetSaveFileName(&ofn)) {
-                wstring fn = sz;
-                if (fn.find(L".bin") == wstring::npos) fn += L".bin";
-                SaveToFile(fn.c_str());
-                MessageBox(hwnd, L"Saved successfully.", L"Save", MB_OK | MB_ICONINFORMATION);
+                OPENFILENAME ofn; wchar_t sz[260] = { 0 };
+                ZeroMemory(&ofn, sizeof(ofn));
+                ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = hwnd;
+                ofn.lpstrFile = sz; ofn.nMaxFile = 260;
+                ofn.lpstrFilter = L"Project Files (*.bin)\0*.bin\0All\0*.*\0";
+                ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+                if (GetSaveFileName(&ofn)) {
+                    wstring fn = sz;
+                    if (fn.find(L".bin") == wstring::npos) fn += L".bin";
+                    SaveToFile(fn.c_str());
+                    MessageBox(hwnd, L"Saved successfully.", L"Save", MB_OK | MB_ICONINFORMATION);
+                }
+                break;
             }
-            break;
-        }
         case IDM_FILE_LOAD: {
             OPENFILENAME ofn; wchar_t sz[260] = { 0 };
             ZeroMemory(&ofn, sizeof(ofn));
@@ -1194,8 +1197,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // --- Point Clipping ---
         if (g_currentMode == MODE_CLIP_POINT) {
             HDC hdc = GetDC(hwnd);
-            DrawClipWindow(hdc);
-            PointClipping(hdc, x, y, g_clipX1, g_clipY1, g_clipX2, g_clipY2, g_drawColor);
+            DrawClipWindow(hdc,false);
+            PointClipping(hdc, x, y, g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, g_drawColor);
+            ReleaseDC(hwnd, hdc);
+            break;
+        }
+        
+        if (g_currentMode == MODE_SQUARE_CLIP_POINT) {
+            HDC hdc = GetDC(hwnd);
+            DrawClipWindow(hdc, true);
+            PointClipping(hdc, x, y, g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2, g_drawColor);
             ReleaseDC(hwnd, hdc);
             break;
         }
@@ -1211,7 +1222,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         if (g_currentMode == MODE_MIDPOINT_ELLIPSE ||
-            g_currentMode == MODE_DIRECT_ELLIPSE) {
+            g_currentMode == MODE_DIRECT_ELLIPSE||
+            g_currentMode == MODE_POLAR_ELLIPSE) {
             if (!g_firstClick)
             {
                 g_startX = x, g_startY = y;
@@ -1227,8 +1239,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 HDC hdc = GetDC(hwnd);
                 if (g_currentMode == MODE_MIDPOINT_ELLIPSE)
                     DrawEllipseMidpoint(hdc, g_startX, g_startY, a, b, g_drawColor);
-                else {
+                else if(g_currentMode == MODE_DIRECT_ELLIPSE) {
                     DrawEllipseDirect(hdc, g_startX, g_startY, a, b, g_drawColor);
+                }
+                else {
+                    EllipsePolar(hdc, g_startX, g_startY, a, b, g_drawColor);
                 }
                 ReleaseDC(hwnd, hdc);
                 cout << "Ellipse drawn with two radii a =" << a << " b=" << b << endl;
@@ -1240,7 +1255,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         {
             HDC hdc = GetDC(hwnd);
             DrawCircleClipWindow(hdc);
-            PointCircleClip(hdc,g_clipXC,g_clipYC,x,y,g_clipR,g_drawColor);
+            PointCircleClip(hdc, g_CircleclipXC, g_CircleclipYC, x, y, g_clipR, g_drawColor);
             ReleaseDC(hwnd, hdc);
             break;
         }
@@ -1281,6 +1296,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             break;
         }
+
 
         // --- Two-click shapes ---
         if (!g_firstClick) {
@@ -1331,12 +1347,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
 
             case MODE_CLIP_LINE:
-                DrawClipWindow(hdc);
+                DrawClipWindow(hdc,false);
                 CohenSuth(hdc, g_startX, g_startY, x, y,
-                    g_clipX1, g_clipY1, g_clipX2, g_clipY2, g_drawColor);
+                    g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, g_drawColor);
+                break;
+            case MODE_SQUARE_CLIP_LINE:
+                DrawClipWindow(hdc, true);
+                CohenSuth(hdc, g_startX, g_startY, x, y,
+                    g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2, g_drawColor);
                 break;
             case MODE_CLIP_CIRCLE_LINE: {
-                LineCircleClip(hdc, g_clipXC, g_clipYC, g_startX, g_startY, x, y, g_clipR, g_drawColor);
+                LineCircleClip(hdc, g_CircleclipXC, g_CircleclipYC, g_startX, g_startY, x, y, g_clipR, g_drawColor);
                 break;
             }
             case MODE_HAPPY_FACE: {
@@ -1365,9 +1386,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_RBUTTONDOWN: {
         if (g_currentMode == MODE_CLIP_POLYGON && g_polygonPoints.size() >= 3) {
             HDC hdc = GetDC(hwnd);
-            DrawClipWindow(hdc);
+            DrawClipWindow(hdc,false);
             PolygonClip(hdc, g_polygonPoints,
-                g_clipX1, g_clipY1, g_clipX2, g_clipY2, g_drawColor);
+                g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, g_drawColor);
             ReleaseDC(hwnd, hdc);
             g_polygonPoints.clear();
         }
@@ -1391,9 +1412,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_currentMode == MODE_CLIP_POINT ||
             g_currentMode == MODE_CLIP_LINE ||
             g_currentMode == MODE_CLIP_POLYGON)
-            DrawClipWindow(hdc);
+            DrawClipWindow(hdc,false);
+        if (g_currentMode == MODE_SQUARE_CLIP_POINT ||
+            g_currentMode == MODE_SQUARE_CLIP_LINE)
+            DrawClipWindow(hdc, true);
         if (g_currentMode == MODE_CLIP_CIRCLE_POINT ||
-            g_currentMode == MODE_CLIP_CIRCLE_LINE ) {
+            g_currentMode == MODE_CLIP_CIRCLE_LINE) {
             DrawCircleClipWindow(hdc);
         }
         EndPaint(hwnd, &ps);
