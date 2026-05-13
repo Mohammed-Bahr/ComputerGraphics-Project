@@ -617,7 +617,7 @@ void PointCircleClip(HDC hdc , int xc,int yc,int x,int y,int R, COLORREF color) 
         {
             for (int dx = -2; dx <= 2; dx++)
             {
-                SetPixel(hdc,xc + dx, yc + dy, color);
+                SetPixel(hdc, x + dx, y + dy, color);
             }
         }
     }
