@@ -1,18 +1,3 @@
-
-/*
- * Computer Graphics Term Project - Person 3 Implementation
- *
- * Responsibilities:
- * - Change background color (Preferences menu)
- * - Choose shape drawing color (Preferences menu)
- * - DDA Line algorithm
- * - Midpoint Line algorithm (Bresenham's)
- * - Modified Midpoint Circle algorithm (Faster Bresenham variant)
- * - Change mouse pointer (Preferences menu)
- *
- * All drawing uses mouse-only input (no keyboard)
- */
-
 #include <windows.h>
 #include <cmath>
 #include <vector>
@@ -113,7 +98,7 @@ bool CheckIFPointINCircle(int R, int xc, int yc, int x, int y) {
 bool FindCircle(int x, int y, int& xc, int& yc, int& R) {
     for (auto& s : g_shapes) {
         if (s.mode == MODE_DIRECT_CIRCLE ||
-            s.mode == MODE_BRESENHAM_CIRCLE || 
+            s.mode == MODE_BRESENHAM_CIRCLE ||
             s.mode == MODE_MODIFIED_MIDPOINT_CIRCLE ||
             s.mode == MODE_POLAR_CIRCLE ||
             s.mode == MODE_ITERATIVE_POLAR_CIRCLE)
@@ -150,10 +135,10 @@ void Draw8Points(HDC hdc, int xc, int yc, int x, int y, COLORREF color) {
 // DRAW 4 SYMMETRIC POINTS FOR ELLIPSE
 // ============================================================================
 void Draw4Points(HDC hdc, int xc, int yc, int x, int y, COLORREF color) {
-    SetPixel(hdc, xc + x, yc + y, color); 
-    SetPixel(hdc, xc - x, yc + y, color);    
-    SetPixel(hdc, xc + x, yc - y, color);    
-    SetPixel(hdc, xc - x, yc - y, color);   
+    SetPixel(hdc, xc + x, yc + y, color);
+    SetPixel(hdc, xc - x, yc + y, color);
+    SetPixel(hdc, xc + x, yc - y, color);
+    SetPixel(hdc, xc - x, yc - y, color);
 }
 
 // ============================================================================
@@ -1293,7 +1278,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 DrawCircleIterativePolar(hdc, g_startX, g_startY, R, g_drawColor);
                 cout << " -> Iterative Polar Circle R=" << R << endl;break;
             }
-            
+
             case MODE_CLIP_LINE:
                 DrawClipWindow(hdc);
                 CohenSuth(hdc, g_startX, g_startY, x, y,
@@ -1302,7 +1287,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             case MODE_CLIP_CIRCLE_LINE: {
                 LineCircleClip(hdc, g_clipXC, g_clipYC, g_startX, g_startY, x, y, g_clipR, g_drawColor);
                 break;
-            }    
+            }
             default: break;
             }
 
