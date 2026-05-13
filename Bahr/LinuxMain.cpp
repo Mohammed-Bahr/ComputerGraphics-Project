@@ -115,6 +115,8 @@ enum DrawMode {
     MODE_FLOOD_FILL,                // Flood fill
     MODE_FILL_RECT_BEZIER,          // Fill rectangle with Bezier curves
     MODE_FILL_SQUARE_HERMITE,       // Fill square with Hermite curves
+    MODE_HAPPY_FACE,                // Happy face (auto-proportioned, 2 clicks)
+    MODE_SAD_FACE,                  // Sad face (auto-proportioned, 2 clicks)
 };
 
 // ============================================================================
@@ -964,49 +966,139 @@ static void FillSquareHermite(cairo_t* cr, int left, int top, int size, Color c)
     }
 }
 
+// Forward declaration needed because FloodFillRec calls RenderShape
+// which is defined later in the file.
+static void RenderShape(cairo_t* cr, const Shape& s);
+
 // ============================================================================
-// ALGORITHM: FLOOD FILL (Recursive)
+// ALGORITHM: FLOOD FILL (Iterative, Stack-Based)
 // ============================================================================
-// Note: Since Cairo does not support pixel reading (GetPixel),
-// flood fill uses the shape store to simulate bounding regions.
-// It fills a rectangular area bounded by the clip window or
-// the drawing area edges.
+// Cairo does not support direct pixel reading, so we use an off-screen
+// image surface (CAIRO_FORMAT_RGB24) to render the current state and
+// read pixel colors. This allows proper flood fill with boundary detection.
 static void FloodFillRec(cairo_t* cr, int x, int y, Color fillColor, Color borderColor) {
     (void)borderColor;
-    // Get the drawing area dimensions
     GtkAllocation alloc;
     gtk_widget_get_allocation(g_drawingArea, &alloc);
     int w = alloc.width;
     int h = alloc.height;
     if (x < 0 || x >= w || y < 0 || y >= h) return;
 
-    // Render a cached snapshot to check pixel colors
-    // Since Cairo doesn't have direct GetPixel, we approximate
-    // by using the shape store. This implementation fills the
-    // current pixel and recurses (pixel-level fill requires
-    // an off-screen surface, which is too complex for this port).
-    // Instead, we draw the fill color at (x, y).
-    SetPixel(cr, x, y, fillColor);
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+    cairo_t* cr_off = cairo_create(surface);
 
-    // Simple recursive flood fill using a 4-directional approach
-    // Note: this will overfill because we can't check pixel colors.
-    // A proper implementation would use an off-screen Cairo surface.
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            if (abs(dx) != abs(dy)) {
-                int nx = x + dx, ny = y + dy;
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                    // Draw pixel - in a real implementation we would check
-                    // if the pixel matches the target color before filling
-                    SetPixel(cr, nx, ny, fillColor);
-                }
-            }
+    cairo_set_source_rgb(cr_off, g_backgroundColor.r, g_backgroundColor.g, g_backgroundColor.b);
+    cairo_paint(cr_off);
+    for (const auto& shape : g_shapes) {
+        if (shape.mode != MODE_FLOOD_FILL) {
+            RenderShape(cr_off, shape);
         }
     }
+    cairo_destroy(cr_off);
+    cairo_surface_flush(surface);
+
+    unsigned char* data = cairo_image_surface_get_data(surface);
+    int stride = cairo_image_surface_get_stride(surface);
+
+    int seed_off = y * stride + x * 4;
+    unsigned char target_b = data[seed_off];
+    unsigned char target_g = data[seed_off + 1];
+    unsigned char target_r = data[seed_off + 2];
+
+    unsigned char fill_b = (unsigned char)(fillColor.b * 255);
+    unsigned char fill_g = (unsigned char)(fillColor.g * 255);
+    unsigned char fill_r = (unsigned char)(fillColor.r * 255);
+
+    // If seed is already the fill color, nothing to do
+    if (target_b == fill_b && target_g == fill_g && target_r == fill_r) {
+        cairo_surface_destroy(surface);
+        return;
+    }
+
+    vector<pair<int,int> > stack;
+    stack.push_back(make_pair(x, y));
+
+    while (!stack.empty()) {
+        int cx = stack.back().first;
+        int cy = stack.back().second;
+        stack.pop_back();
+
+        if (cx < 0 || cx >= w || cy < 0 || cy >= h) continue;
+
+        int off = cy * stride + cx * 4;
+        if (data[off] != target_b || data[off + 1] != target_g || data[off + 2] != target_r)
+            continue;
+
+        data[off] = fill_b;
+        data[off + 1] = fill_g;
+        data[off + 2] = fill_r;
+
+        SetPixel(cr, cx, cy, fillColor);
+
+        stack.push_back(make_pair(cx + 1, cy));
+        stack.push_back(make_pair(cx - 1, cy));
+        stack.push_back(make_pair(cx, cy + 1));
+        stack.push_back(make_pair(cx, cy - 1));
+    }
+
+    cairo_surface_destroy(surface);
 }
 
 // ============================================================================
-// ALGORITHM: CARDINAL SPLINE
+// ALGORITHM: DRAW HAPPY FACE (Auto-proportioned)
+// ============================================================================
+// Draws a happy face from 2 clicks (center + radius).
+// Eyes, nose, and smile are positioned automatically.
+static void DrawSadFace(cairo_t* cr, int xc, int yc, int R, Color color) {
+    if (R <= 0) return;
+
+    DrawCircleDirect(cr, xc, yc, R, color);
+
+    int eyeR = max(1, R / 8);
+    int eyeOffX = R / 3;
+    int eyeY = yc - R / 4;
+
+    DrawCircleDirect(cr, xc - eyeOffX, eyeY, eyeR, color);
+    DrawCircleDirect(cr, xc + eyeOffX, eyeY, eyeR, color);
+
+    DrawLineDDA(cr, xc, eyeY + eyeR, xc, yc + R / 6, color);
+
+    int mouthY = yc + R / 3;
+    int mouthW = R * 2 / 3;
+    Point2D m0 = {xc - mouthW, mouthY};
+    Point2D m3 = {xc + mouthW, mouthY};
+    Point2D m1 = {xc - mouthW / 2, mouthY - R / 4};
+    Point2D m2 = {xc + mouthW / 2, mouthY - R / 4};
+    DrawBezier(cr, m0, m1, m2, m3, color);
+}
+
+// ============================================================================
+// ALGORITHM: DRAW SAD FACE (Auto-proportioned)
+// ============================================================================
+// Draws a sad face from 2 clicks (center + radius).
+// Eyes, nose, and frown are positioned automatically.
+static void DrawHappyFace(cairo_t* cr, int xc, int yc, int R, Color color) {
+    if (R <= 0) return;
+
+    DrawCircleDirect(cr, xc, yc, R, color);
+
+    int eyeR = max(1, R / 8);
+    int eyeOffX = R / 3;
+    int eyeY = yc - R / 4;
+
+    DrawCircleDirect(cr, xc - eyeOffX, eyeY, eyeR, color);
+    DrawCircleDirect(cr, xc + eyeOffX, eyeY, eyeR, color);
+
+    DrawLineDDA(cr, xc, eyeY + eyeR, xc, yc + R / 6, color);
+
+    int mouthY = yc + R / 3;
+    int mouthW = R * 2 / 3;
+    Point2D m0 = {xc - mouthW, mouthY};
+    Point2D m3 = {xc + mouthW, mouthY};
+    Point2D m1 = {xc - mouthW / 2, mouthY + R / 4};
+    Point2D m2 = {xc + mouthW / 2, mouthY + R / 4};
+    DrawBezier(cr, m0, m1, m2, m3, color);
+}
 // ============================================================================
 static void DrawCardinalSpline(cairo_t* cr, vector<Point2D>& pts, double c, Color color) {
     int n = (int)pts.size();
@@ -1607,6 +1699,20 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
         break;
     }
 
+    case MODE_HAPPY_FACE: {
+        int dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+        int R = (int)sqrt(dx * dx + dy * dy);
+        DrawHappyFace(cr, s.x1, s.y1, R, s.color);
+        break;
+    }
+
+    case MODE_SAD_FACE: {
+        int dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+        int R = (int)sqrt(dx * dx + dy * dy);
+        DrawSadFace(cr, s.x1, s.y1, R, s.color);
+        break;
+    }
+
     case MODE_FLOOD_FILL: {
         FloodFillRec(cr, s.x1, s.y1, s.color, s.color);
         break;
@@ -2069,6 +2175,16 @@ static gboolean on_button_press(GtkWidget* widget,
             }
             break;
         }
+        case MODE_HAPPY_FACE: {
+            int R = (int)sqrt(pow(x - g_startX, 2) + pow(y - g_startY, 2));
+            cout << "  -> Happy Face R=" << R << endl;
+            break;
+        }
+        case MODE_SAD_FACE: {
+            int R = (int)sqrt(pow(x - g_startX, 2) + pow(y - g_startY, 2));
+            cout << "  -> Sad Face R=" << R << endl;
+            break;
+        }
         default:
             break;
         }
@@ -2444,6 +2560,20 @@ static void on_fill_square_hermite(GtkMenuItem*, gpointer) {
     cout << "\n[Fill Square Hermite] Click two points for square corners." << endl;
 }
 
+static void on_happy_face(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_HAPPY_FACE;
+    g_firstClick  = false;
+    g_secondClick = false;
+    cout << "\n[Happy Face] Click center, then a radius point." << endl;
+}
+
+static void on_sad_face(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_SAD_FACE;
+    g_firstClick  = false;
+    g_secondClick = false;
+    cout << "\n[Sad Face] Click center, then a radius point." << endl;
+}
+
 // ============================================================================
 // MENU BUILDER
 // ============================================================================
@@ -2722,6 +2852,25 @@ static GtkWidget* build_menu_bar() {
         gtk_menu_shell_append(GTK_MENU_SHELL(clip_menu), ccl_item);
 
     gtk_menu_shell_append(GTK_MENU_SHELL(bar), clip_item);
+
+    // ====================================================================
+    // BONUS MENU
+    // ====================================================================
+    GtkWidget* bonus_menu = gtk_menu_new();
+    GtkWidget* bonus_item = gtk_menu_item_new_with_label("Bonus");
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(bonus_item), bonus_menu);
+
+        GtkWidget* happy_item = gtk_menu_item_new_with_label("Happy Face");
+        g_signal_connect(happy_item, "activate",
+                         G_CALLBACK(on_happy_face), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(bonus_menu), happy_item);
+
+        GtkWidget* sad_item = gtk_menu_item_new_with_label("Sad Face");
+        g_signal_connect(sad_item, "activate",
+                         G_CALLBACK(on_sad_face), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(bonus_menu), sad_item);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(bar), bonus_item);
 
     return bar;  // Return the fully constructed menu bar
 }
