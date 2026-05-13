@@ -54,6 +54,7 @@
 #include <vector>         // std::vector: dynamic array for storing shapes/points
 #include <iostream>       // std::cout: console output for debugging / user feedback
 #include <algorithm>      // std::max, std::min
+#include <cstdio>         // std::fopen, fwrite, fread, fclose for save/load
 
 using namespace std;
 
@@ -1752,6 +1753,66 @@ static gboolean on_button_press(GtkWidget* widget,
 }
 
 // ============================================================================
+// FILE SAVE / LOAD
+// ============================================================================
+static void SaveToFile(const char* filename) {
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        cout << "  Error: Cannot open file for writing." << endl;
+        return;
+    }
+    int n = (int)g_shapes.size();
+    fwrite(&n, sizeof(int), 1, f);
+    for (auto& s : g_shapes) {
+        int modeVal = (int)s.mode;
+        fwrite(&modeVal, sizeof(int), 1, f);
+        fwrite(&s.color, sizeof(Color), 1, f);
+        fwrite(&s.x1, sizeof(int), 1, f);
+        fwrite(&s.y1, sizeof(int), 1, f);
+        fwrite(&s.x2, sizeof(int), 1, f);
+        fwrite(&s.y2, sizeof(int), 1, f);
+    }
+    fclose(f);
+    cout << "  Saved " << n << " shapes to '" << filename << "'" << endl;
+}
+
+static void LoadFromFile(const char* filename) {
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        cout << "  Error: Cannot open file for reading." << endl;
+        return;
+    }
+    int n = 0;
+    fread(&n, sizeof(int), 1, f);
+    if (n < 0 || n > 100000) {
+        cout << "  Error: Invalid file format." << endl;
+        fclose(f);
+        return;
+    }
+    g_shapes.clear();
+    g_polygonPoints.clear();
+    g_polygonResult.clear();
+    g_polygonClipped = false;
+    g_firstClick = false;
+    g_secondClick = false;
+    for (int i = 0; i < n; i++) {
+        Shape s;
+        int modeVal;
+        fread(&modeVal, sizeof(int), 1, f);
+        s.mode = (DrawMode)modeVal;
+        fread(&s.color, sizeof(Color), 1, f);
+        fread(&s.x1, sizeof(int), 1, f);
+        fread(&s.y1, sizeof(int), 1, f);
+        fread(&s.x2, sizeof(int), 1, f);
+        fread(&s.y2, sizeof(int), 1, f);
+        g_shapes.push_back(s);
+    }
+    fclose(f);
+    gtk_widget_queue_draw(g_drawingArea);
+    cout << "  Loaded " << n << " shapes from '" << filename << "'" << endl;
+}
+
+// ============================================================================
 // MENU CALLBACKS
 // ============================================================================
 // Each callback corresponds to a menu item. They set the current mode or
@@ -1770,15 +1831,49 @@ static void on_file_clear(GtkMenuItem* /*item*/, gpointer /*data*/) {
 }
 
 // ---- Clear Button Callback ----
-static void on_clear_button(GtkButton*, gpointer) {
-    g_shapes.clear();
-    g_polygonPoints.clear();
-    g_polygonResult.clear();
-    g_polygonClipped = false;
-    g_firstClick = false;
-    g_secondClick = false;
-    gtk_widget_queue_draw(g_drawingArea);
-    cout << "Screen cleared." << endl;
+// static void on_clear_button(GtkButton*, gpointer) {
+//     g_shapes.clear();
+//     g_polygonPoints.clear();
+//     g_polygonResult.clear();
+//     g_polygonClipped = false;
+//     g_firstClick = false;
+//     g_secondClick = false;
+//     gtk_widget_queue_draw(g_drawingArea);
+//     cout << "Screen cleared." << endl;
+// }
+
+// ---- File > Save to File ----
+static void on_file_save(GtkMenuItem*, gpointer) {
+    GtkWidget* dialog = gtk_file_chooser_dialog_new(
+        "Save to File", GTK_WINDOW(g_mainWindow),
+        GTK_FILE_CHOOSER_ACTION_SAVE,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Save", GTK_RESPONSE_ACCEPT, NULL);
+    gtk_file_chooser_set_do_overwrite_confirmation(
+        GTK_FILE_CHOOSER(dialog), TRUE);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char* filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        SaveToFile(filename);
+        g_free(filename);
+    }
+    gtk_widget_destroy(dialog);
+}
+
+// ---- File > Load from File ----
+static void on_file_load(GtkMenuItem*, gpointer) {
+    GtkWidget* dialog = gtk_file_chooser_dialog_new(
+        "Load from File", GTK_WINDOW(g_mainWindow),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Open", GTK_RESPONSE_ACCEPT, NULL);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char* filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        LoadFromFile(filename);
+        g_free(filename);
+    }
+    gtk_widget_destroy(dialog);
 }
 
 // ---- Preferences > Background: Black ----
@@ -2001,6 +2096,19 @@ static GtkWidget* build_menu_bar() {
                          G_CALLBACK(on_file_clear), nullptr);
         gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), clear_item);
 
+        gtk_menu_shell_append(GTK_MENU_SHELL(file_menu),
+                              gtk_separator_menu_item_new());
+
+        GtkWidget* save_item = gtk_menu_item_new_with_label("Save to File...");
+        g_signal_connect(save_item, "activate",
+                         G_CALLBACK(on_file_save), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), save_item);
+
+        GtkWidget* load_item = gtk_menu_item_new_with_label("Load from File...");
+        g_signal_connect(load_item, "activate",
+                         G_CALLBACK(on_file_load), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), load_item);
+
     gtk_menu_shell_append(GTK_MENU_SHELL(bar), file_item);
 
     // ====================================================================
@@ -2219,9 +2327,9 @@ int main(int argc, char* argv[]) {
 
     // Step 5: Add a Clear button below the menu bar
     GtkWidget* clear_button = gtk_button_new_with_label("Clear");
-    g_signal_connect(clear_button, "clicked",
-                     G_CALLBACK(on_clear_button), nullptr);
-    gtk_box_pack_start(GTK_BOX(vbox), clear_button, FALSE, FALSE, 2);
+    // g_signal_connect(clear_button, "clicked",
+    //                  G_CALLBACK(on_clear_button), nullptr);
+    // gtk_box_pack_start(GTK_BOX(vbox), clear_button, FALSE, FALSE, 2);
 
     // Step 6: Create the drawing area (fills remaining space in vbox)
     g_drawingArea = gtk_drawing_area_new();
