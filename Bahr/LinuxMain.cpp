@@ -1185,13 +1185,10 @@ static void PolygonClip(cairo_t* cr, vector<Point2D>& pts,
 static void PointCircleClip(cairo_t* cr, int xc, int yc,
                             int x, int y, int R, Color color) {
     if (CheckIFPointINCircle(R, xc, yc, x, y)) {
-        // Fill the entire bounding box of the circle
-        cairo_set_source_rgb(cr, color.r, color.g, color.b);
-        for (int dy = -R; dy < R; dy++) {
-            for (int dx = -R; dx < R; dx++) {
-                SetPixel(cr, xc + dx, yc + dy, color);
-            }
-        }
+        // Draw a small cross marker at the test point
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dy = -2; dy <= 2; dy++)
+                SetPixel(cr, x + dx, y + dy, color);
     }
 }
 
@@ -1362,9 +1359,12 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
     // CLIPPING: CIRCULAR POINT
     // ====================================================================
     case MODE_CLIP_CIRCLE_POINT: {
-        // s.x1 = radius, s.x2,s.y2 = circle center
-        int xc = s.x2, yc = s.y2, R = s.x1;
-        PointCircleClip(cr, xc, yc, s.x1, s.y1, R, s.color);
+        // (x1,y1) = click point, (x2,y2) = circle center
+        // Find the circle to get its radius and test the click point
+        int xc, yc, R;
+        if (FindCircle(s.x1, s.y1, xc, yc, R)) {
+            PointCircleClip(cr, xc, yc, s.x1, s.y1, R, s.color);
+        }
         break;
     }
 
@@ -1588,8 +1588,8 @@ static gboolean on_button_press(GtkWidget* widget,
             Shape s;
             s.mode  = MODE_CLIP_CIRCLE_POINT;
             s.color = g_drawColor;
-            s.x1    = R;        // Store radius
-            s.y1    = 0;        // Unused
+            s.x1    = x;        // Store click point x
+            s.y1    = y;        // Store click point y
             s.x2    = xc;       // Store circle center
             s.y2    = yc;
             g_shapes.push_back(s);
