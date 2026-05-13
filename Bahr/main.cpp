@@ -49,8 +49,16 @@ using namespace std;
 #define IDM_ELLIPSE_POLAR              602
 #define IDM_ELLIPSE_MIDPOINT           603
 #define IDM_FILL_CIRCLES_LINES         701
+#define IDM_FILL_CIRCLES_CIRCLES       702
+#define IDM_FILL_SQUARE_HERMITE         703
+#define IDM_FILL_RECTANGLE_BEZIER      704
+#define IDM_FLOOD_FILL                 705
+#define IDM_NRFLOOD_FILL               706
+#define IDM_CONVEX_FILL                707
+#define IDM_NON_CONVEX_FILL            708
 #define IDM_HAPPY_FACE                 801
 #define IDM_SAD_FACE                   802
+#define IDM_CARDINAL_SPLINE            901
 
 
 
@@ -76,6 +84,13 @@ enum DrawMode {
     MODE_MIDPOINT_ELLIPSE,
     MODE_BRESENHAM_CIRCLE,
     MODE_FILL_CIRCLE_WITH_LINES,
+    MODE_FILL_CIRCLE_WITH_CIRCLES,
+    MODE_FILL_SQUARE_HERMITE,
+    MODE_FILL_RECTANGLE_BEZIER,
+    MODE_CONVEX_FILL,
+    MODE_NON_CONVEX_FILL,
+    MODE_FLOOD_FILL,
+    MODE_NRFLOOD_FILL,
     MODE_CLIP_POINT,
     MODE_CLIP_LINE,
     MODE_CLIP_POLYGON,
@@ -85,6 +100,7 @@ enum DrawMode {
     MODE_CLIP_CIRCLE_LINE,
     MODE_HAPPY_FACE,
     MODE_SAD_FACE,
+    MODE_CARDINAL_SPLINE,
 };
 
 DrawMode g_currentMode = MODE_NONE;
@@ -827,7 +843,9 @@ void DrawHappyFace(HDC hdc, int xc, int yc, int R, COLORREF color) {
     DrawBezier(hdc, m0, m1, m2, m3, color);
 }
 
-
+// ============================================================================
+// Cardinal Spline Curve
+// ============================================================================
 void DrawCardinalSpline(HDC hdc, Point p[], int n, double c, COLORREF color)
 {
     for (int i = 1; i < n - 2; i++)
@@ -957,7 +975,14 @@ HMENU CreateMainMenu() {
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hEllipse, L"Ellipses");
 
     HMENU hFill = CreatePopupMenu();
-    AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_LINES, L"Fill Circles with Lines");
+    AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_LINES, L"Fill Circle with Lines");
+    AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_CIRCLES, L"Fill Circle with Circles ");
+    AppendMenu(hFill, MF_STRING, IDM_FILL_SQUARE_HERMITE, L"Fill Square with Hermite Curves");
+    AppendMenu(hFill, MF_STRING, IDM_FILL_RECTANGLE_BEZIER, L"Fill Rectangle with Bezier Curves");
+    AppendMenu(hFill, MF_STRING, IDM_CONVEX_FILL, L"Convex Fill");
+    AppendMenu(hFill, MF_STRING, IDM_NON_CONVEX_FILL, L"Non Convex Fill ");
+    AppendMenu(hFill, MF_STRING, IDM_FLOOD_FILL, L"Recursive Flood Fill");
+    AppendMenu(hFill, MF_STRING, IDM_NRFLOOD_FILL, L"Non Recursive Flood Fill");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hFill, L"Filling");
 
     HMENU hClip = CreatePopupMenu();
@@ -969,6 +994,10 @@ HMENU CreateMainMenu() {
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_POINT, L"Circular Point Clipping");
     AppendMenu(hClip, MF_STRING, IDM_CIRCLE_CLIP_LINE, L"Circular Line Clipping");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hClip, L"Clipping");
+
+    HMENU hSpline = CreatePopupMenu();
+    AppendMenu(hSpline, MF_STRING, IDM_CARDINAL_SPLINE, L"Cardinal Spline Curve");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)hSpline, L"Curves");
 
     HMENU hBouns = CreatePopupMenu();
     AppendMenu(hBouns, MF_STRING, IDM_HAPPY_FACE, L"Happy Face");
@@ -1112,11 +1141,43 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode = MODE_MIDPOINT_ELLIPSE; g_firstClick = false;
             cout << "Midpoint Ellipse Mode -> Click center , then click a point to focus the ellipse" << endl;
             break;
-
+            // Curves Menu
+        case IDM_CARDINAL_SPLINE:
+            g_currentMode = MODE_CARDINAL_SPLINE; g_firstClick = false;
+            cout << "Cardinal Spline Curves Mode ->" << endl;
+            break;
             // Filling Menu
         case IDM_FILL_CIRCLES_LINES:
             g_currentMode = MODE_FILL_CIRCLE_WITH_LINES; g_firstClick = false;
             cout << " Fill Circle With Lines Mode -> Click a quarter of circle to fill it" << endl;
+            break;
+        case IDM_FILL_CIRCLES_CIRCLES:
+            g_currentMode = MODE_FILL_CIRCLE_WITH_CIRCLES; g_firstClick = false;
+            cout << " Fill Circle With Circles Mode -> Click a quarter of circle to fill it" << endl;
+            break;
+        case IDM_FILL_SQUARE_HERMITE:
+            g_currentMode = MODE_FILL_SQUARE_HERMITE; g_firstClick = false;
+            cout << " Fill Square with Hermite Curves Mode -> " << endl;
+            break;
+        case IDM_FILL_RECTANGLE_BEZIER:
+            g_currentMode = MODE_FILL_RECTANGLE_BEZIER; g_firstClick = false;
+            cout << " Fill Rectangle with Bezier Curves Mode -> " << endl;
+            break;
+        case IDM_CONVEX_FILL:
+            g_currentMode = MODE_CONVEX_FILL; g_firstClick = false;
+            cout << " Convex Fill Mode -> " << endl;
+            break;
+        case IDM_NON_CONVEX_FILL:
+            g_currentMode = MODE_NON_CONVEX_FILL; g_firstClick = false;
+            cout << " Non Convex Fill Mode -> " << endl;
+            break;
+        case IDM_FLOOD_FILL:
+            g_currentMode = MODE_FLOOD_FILL; g_firstClick = false;
+            cout << " Recursive Flood Fill Mode ->" << endl;
+            break;
+        case IDM_NRFLOOD_FILL:
+            g_currentMode = MODE_NRFLOOD_FILL; g_firstClick = false;
+            cout << " NON Recursive Flood Fill Mode ->" << endl;
             break;
             // Clipping Menu
         case IDM_CLIP_POINT:
@@ -1275,18 +1336,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             if (angle >= 0 && angle < PI / 2)
             {
-                thetaS = 0, thetaE = PI / 2, Q = "1st";
+                thetaS = 0, thetaE = PI / 2, Q = "4th";
             }
             else if (angle >= PI / 2 && angle < PI)
             {
-                thetaS = PI / 2, thetaE = PI, Q = "2nd";
+                thetaS = PI / 2, thetaE = PI, Q = "3th";
             }
             else if (angle >= -PI && angle < -PI / 2)
             {
-                thetaS = PI, thetaE = 3 * PI / 2, Q = "3th";
+                thetaS = PI, thetaE = 3 * PI / 2, Q = "2nd";
             }
             else {
-                thetaS = 3 * PI / 2, thetaE = 2 * PI, Q = "4th";
+                thetaS = 3 * PI / 2, thetaE = 2 * PI, Q = "1st";
             }
             HDC hdc = GetDC(hwnd);
             FillCircleWithLines(hdc, xc, yc, R, thetaS, thetaE, g_drawColor);
