@@ -645,6 +645,205 @@ void LineCircleClip(HDC hdc, int xc, int yc, int x1, int y1,int x2,int y2, int R
     }
 
 }
+
+
+
+void Draw4Points(HDC hdc, int xc, int yc, int x, int y, COLORREF c)
+{
+    SetPixel(hdc, xc + x, yc + y, c);
+    SetPixel(hdc, xc - x, yc + y, c);
+    SetPixel(hdc, xc - x, yc - y, c);
+    SetPixel(hdc, xc + x, yc - y, c);
+}
+
+void EllipsePolar(HDC hdc, int xc, int yc, int a, int b, COLORREF c)
+{
+    double theta = 0;
+    double dtheta = 1.0 / max(a, b);
+
+    while (theta < 6.28)
+    {
+        int x = a * cos(theta);
+        int y = b * sin(theta);
+
+        Draw4Points(hdc, xc, yc, x, y, c);
+
+        theta += dtheta;
+    }
+}
+
+struct Point
+{
+    int x, y;
+};
+
+Point Bezier(Point p0, Point p1, Point p2, Point p3, double t)
+{
+    double c1 = pow(1 - t, 3);
+    double c2 = 3 * t * pow(1 - t, 2);
+    double c3 = 3 * t * t * (1 - t);
+    double c4 = t * t * t;
+
+    Point p;
+
+    p.x = c1 * p0.x + c2 * p1.x + c3 * p2.x + c4 * p3.x;
+    p.y = c1 * p0.y + c2 * p1.y + c3 * p2.y + c4 * p3.y;
+
+    return p;
+}
+
+void DrawBezier(HDC hdc, Point p0, Point p1, Point p2, Point p3, COLORREF c)
+{
+    for(double t = 0; t <= 1; t += 0.001)
+    {
+        Point p = Bezier(p0,p1,p2,p3,t);
+
+        SetPixel(hdc,p.x,p.y,c);
+    }
+}
+
+void FillRectangleBezier(HDC hdc,int left,int top,int right,int bottom,COLORREF c)
+{
+    for(int y = top; y <= bottom; y += 5)
+    {
+        Point p0 = {left,y};
+        Point p1 = {left+50,y+20};
+        Point p2 = {right-50,y-20};
+        Point p3 = {right,y};
+
+        DrawBezier(hdc,p0,p1,p2,p3,c);
+    }
+}
+
+Point Hermite(Point p0, Point t0, Point p1, Point t1, double t)
+{
+    double h1 = 2*t*t*t - 3*t*t + 1;
+    double h2 = -2*t*t*t + 3*t*t;
+    double h3 = t*t*t - 2*t*t + t;
+    double h4 = t*t*t - t*t;
+
+    Point p;
+
+    p.x = h1*p0.x + h2*p1.x + h3*t0.x + h4*t1.x;
+    p.y = h1*p0.y + h2*p1.y + h3*t0.y + h4*t1.y;
+
+    return p;
+}
+
+void DrawHermite(HDC hdc, Point p0, Point t0, Point p1, Point t1, COLORREF c)
+{
+    for(double t=0; t<=1; t+=0.001)
+    {
+        Point p = Hermite(p0,t0,p1,t1,t);
+
+        SetPixel(hdc,p.x,p.y,c);
+    }
+}
+
+void FillSquareHermite(HDC hdc,int left,int top,int size,COLORREF c)
+{
+    for(int x=left; x<=left+size; x+=5)
+    {
+        Point p0 = {x,top};
+        Point p1 = {x,top+size};
+
+        Point t0 = {50,0};
+        Point t1 = {-50,0};
+
+        DrawHermite(hdc,p0,t0,p1,t1,c);
+    }
+}
+
+
+Point Bezier(Point p0, Point p1, Point p2, Point p3, double t)
+{
+    double c1 = pow(1 - t, 3);
+    double c2 = 3 * t * pow(1 - t, 2);
+    double c3 = 3 * t * t * (1 - t);
+    double c4 = t * t * t;
+
+    Point p;
+
+    p.x = c1 * p0.x + c2 * p1.x + c3 * p2.x + c4 * p3.x;
+    p.y = c1 * p0.y + c2 * p1.y + c3 * p2.y + c4 * p3.y;
+
+    return p;
+}
+
+void DrawBezier(HDC hdc, Point p0, Point p1, Point p2, Point p3, COLORREF c)
+{
+    for(double t = 0; t <= 1; t += 0.001)
+    {
+        Point p = Bezier(p0,p1,p2,p3,t);
+
+        SetPixel(hdc,p.x,p.y,c);
+    }
+}
+
+void FillRectangleBezier(HDC hdc,int left,int top,int right,int bottom,COLORREF c)
+{
+    for(int y = top; y <= bottom; y += 5)
+    {
+        Point p0 = {left,y};
+        Point p1 = {left+50,y+20};
+        Point p2 = {right-50,y-20};
+        Point p3 = {right,y};
+
+        DrawBezier(hdc,p0,p1,p2,p3,c);
+    }
+}
+
+
+void FloodFillRec(HDC hdc,int x,int y,COLORREF fillColor,COLORREF borderColor)
+{
+    COLORREF c = GetPixel(hdc,x,y);
+
+    if(c != borderColor && c != fillColor)
+    {
+        SetPixel(hdc,x,y,fillColor);
+
+        FloodFillRec(hdc,x+1,y,fillColor,borderColor);
+        FloodFillRec(hdc,x-1,y,fillColor,borderColor);
+        FloodFillRec(hdc,x,y+1,fillColor,borderColor);
+        FloodFillRec(hdc,x,y-1,fillColor,borderColor);
+    }
+}
+
+
+void FloodFillRec(HDC hdc,int x,int y,COLORREF fillColor,COLORREF borderColor)
+{
+    COLORREF c = GetPixel(hdc,x,y);
+
+    if(c != borderColor && c != fillColor)
+    {
+        SetPixel(hdc,x,y,fillColor);
+
+        FloodFillRec(hdc,x+1,y,fillColor,borderColor);
+        FloodFillRec(hdc,x-1,y,fillColor,borderColor);
+        FloodFillRec(hdc,x,y+1,fillColor,borderColor);
+        FloodFillRec(hdc,x,y-1,fillColor,borderColor);
+    }
+}
+
+
+void DrawCardinalSpline(HDC hdc, Point p[], int n, double c, COLORREF color)
+{
+    for(int i=1; i<n-2; i++)
+    {
+        Point t1, t2;
+
+        t1.x = c * (p[i+1].x - p[i-1].x);
+        t1.y = c * (p[i+1].y - p[i-1].y);
+
+        t2.x = c * (p[i+2].x - p[i].x);
+        t2.y = c * (p[i+2].y - p[i].y);
+
+        DrawHermite(hdc,p[i],t1,p[i+1],t2,color);
+    }
+}
+
+
+
 // ============================================================================
 // SHAPE RENDERING  (FIX 5: clipping modes also redraw clip window)
 // ============================================================================
@@ -783,7 +982,6 @@ void LoadFromFile(HWND hwnd, const wchar_t* fn) {
         InvalidateRect(hwnd, NULL, TRUE);
     }
 }
-
 // ============================================================================
 // WINDOW PROCEDURE
 // ============================================================================
