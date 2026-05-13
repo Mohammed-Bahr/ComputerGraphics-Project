@@ -18,6 +18,7 @@
 #include <vector>
 #include <iostream>
 #include <string>
+#include <commctrl.h>
 using namespace std;
 // ============================================================================
 // MENU IDS
@@ -46,6 +47,8 @@ using namespace std;
 #define IDM_ELLIPSE_DIRECT             602
 #define IDM_ELLIPSE_MIDPOINT           603
 #define IDM_FILL_CIRCLES_LINES         701
+
+#define IDC_CLEAR_BTN                  1001
 
 
 
@@ -796,6 +799,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         // Attach menu to window
         SetMenu(hwnd, CreateMainMenu());
 
+        // Create Clear button at top-right of client area
+        CreateWindow(L"BUTTON", L"Clear",
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            720, 5, 60, 26, hwnd, (HMENU)IDC_CLEAR_BTN,
+            ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
         // Open console for messages
         AllocConsole();
         FILE* fp; freopen_s(&fp, "CONOUT$", "w", stdout);
@@ -810,7 +819,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         switch (menuId) {
 
         case IDM_FILE_CLEAR:
-            g_shapes.clear(); g_firstClick = false;
+        case IDC_CLEAR_BTN:
+            g_shapes.clear();
+            g_polygonPoints.clear();
+            g_firstClick = false;
+            g_secondClick = false;
             InvalidateRect(hwnd, NULL, TRUE);
             cout << "Screen cleared." << endl;
             break;
