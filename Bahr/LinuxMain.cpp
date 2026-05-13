@@ -1769,6 +1769,18 @@ static void on_file_clear(GtkMenuItem* /*item*/, gpointer /*data*/) {
     cout << "Screen cleared." << endl;
 }
 
+// ---- Clear Button Callback ----
+static void on_clear_button(GtkButton*, gpointer) {
+    g_shapes.clear();
+    g_polygonPoints.clear();
+    g_polygonResult.clear();
+    g_polygonClipped = false;
+    g_firstClick = false;
+    g_secondClick = false;
+    gtk_widget_queue_draw(g_drawingArea);
+    cout << "Screen cleared." << endl;
+}
+
 // ---- Preferences > Background: Black ----
 static void on_bg_black(GtkMenuItem* /*item*/, gpointer /*data*/) {
     g_backgroundColor = {0.0, 0.0, 0.0};
@@ -2205,7 +2217,13 @@ int main(int argc, char* argv[]) {
     // expand=FALSE → menu bar takes only its minimum height
     gtk_box_pack_start(GTK_BOX(vbox), menu_bar, FALSE, FALSE, 0);
 
-    // Step 5: Create the drawing area (fills remaining space in vbox)
+    // Step 5: Add a Clear button below the menu bar
+    GtkWidget* clear_button = gtk_button_new_with_label("Clear");
+    g_signal_connect(clear_button, "clicked",
+                     G_CALLBACK(on_clear_button), nullptr);
+    gtk_box_pack_start(GTK_BOX(vbox), clear_button, FALSE, FALSE, 2);
+
+    // Step 6: Create the drawing area (fills remaining space in vbox)
     g_drawingArea = gtk_drawing_area_new();
     gtk_widget_set_hexpand(g_drawingArea, TRUE);   // Expand horizontally
     gtk_widget_set_vexpand(g_drawingArea, TRUE);   // Expand vertically
