@@ -1857,9 +1857,7 @@ static gboolean on_draw(GtkWidget* /*widget*/, cairo_t* cr,
  * @param data     User data (unused)
  * @return TRUE if the event was handled, FALSE otherwise
  */
-static gboolean on_button_press(GtkWidget* widget,
-                                GdkEventButton* event,
-                                gpointer /*data*/) {
+static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpointer /*data*/) {
     // Get click coordinates (relative to the drawing area widget)
     int x = (int)event->x;
     int y = (int)event->y;
