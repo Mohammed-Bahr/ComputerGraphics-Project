@@ -50,7 +50,7 @@ using namespace std;
 #define IDM_ELLIPSE_MIDPOINT           603
 #define IDM_FILL_CIRCLES_LINES         701
 #define IDM_FILL_CIRCLES_CIRCLES       702
-#define IDM_FILL_SQUARE_HERMITE         703
+#define IDM_FILL_SQUARE_HERMITE        703
 #define IDM_FILL_RECTANGLE_BEZIER      704
 #define IDM_FLOOD_FILL                 705
 #define IDM_NRFLOOD_FILL               706
@@ -59,6 +59,7 @@ using namespace std;
 #define IDM_HAPPY_FACE                 801
 #define IDM_SAD_FACE                   802
 #define IDM_CARDINAL_SPLINE            901
+#define IDM_POLYGON_DRAW               1001 
 
 
 
@@ -101,6 +102,7 @@ enum DrawMode {
     MODE_HAPPY_FACE,
     MODE_SAD_FACE,
     MODE_CARDINAL_SPLINE,
+    MODE_POLYGON_DRAW,
 };
 
 DrawMode g_currentMode = MODE_NONE;
@@ -125,6 +127,13 @@ g_CircleclipXC = 400, g_CircleclipYC = 300, g_clipR = 150;
 // HELPER FUNCTIONS
 // ============================================================================
 int Round(double x) { return (int)(x + 0.5); }
+
+struct Point
+{
+    int x, y;
+};
+
+vector<Point> polygonPoints;
 
 void swap(int& a, int& b, int& c, int& d) {
     int temp;
@@ -694,11 +703,6 @@ void EllipsePolar(HDC hdc, int xc, int yc, int a, int b, COLORREF c)
     }
 }
 
-struct Point
-{
-    int x, y;
-};
-
 Point Bezier(Point p0, Point p1, Point p2, Point p3, double t)
 {
     double c1 = pow(1 - t, 3);
@@ -862,7 +866,230 @@ void DrawCardinalSpline(HDC hdc, Point p[], int n, double c, COLORREF color)
     }
 }
 
+void drawPolygon(HDC hdc, vector<Point>& p, COLORREF c)
+{
+    int n = p.size();
 
+    if (n < 3)
+        return;
+
+    for (int i = 0; i < n; i++)
+    {
+        Point p1 = p[i];
+        Point p2 = p[(i + 1) % n];
+
+        DrawLineDDA(hdc, p1.x, p1.y, p2.x, p2.y, c);
+    }
+}
+
+struct EdgeRec
+{
+    double x;
+    double minv;
+    int ymax;
+};
+
+void InitEdgeRec(EdgeRec& edge, Point v1, Point v2)
+{
+    if (v1.y > v2.y){
+        Point temp = v1;
+        v1 = v2;
+        v2 = temp;
+    }
+        
+
+    edge.x = v1.x;
+    edge.ymax = v2.y;
+
+    if (v2.y - v1.y != 0)
+        edge.minv = (double)(v2.x - v1.x) / (v2.y - v1.y);
+}
+
+void ConvexFill(HDC hdc, vector<Point>& p, COLORREF color)
+{
+    int n = p.size();
+
+    if (n < 3)
+        return;
+
+    int ymin = p[0].y;
+    int ymax = p[0].y;
+
+    for (int i = 1; i < n; i++)
+    {
+        ymin = min(ymin, p[i].y);
+        ymax = max(ymax, p[i].y);
+    }
+
+    vector<vector<EdgeRec>> table(ymax + 1);
+
+    for (int i = 0; i < n; i++)
+    {
+        Point v1 = p[i];
+        Point v2 = p[(i + 1) % n];
+
+        if (v1.y == v2.y)
+            continue;
+
+        EdgeRec edge;
+        InitEdgeRec(edge, v1, v2);
+
+        table[min(v1.y, v2.y)].push_back(edge);
+    }
+
+    vector<EdgeRec> active;
+
+    for (int y = ymin; y < ymax; y++)
+    {
+        for (auto& edge : table[y])
+            active.push_back(edge);
+
+        active.erase(
+            remove_if(active.begin(), active.end(),
+                [y](EdgeRec& e)
+                {
+                    return y >= e.ymax;
+                }),
+            active.end()
+        );
+
+        sort(active.begin(), active.end(),
+            [](EdgeRec& a, EdgeRec& b)
+            {
+                return a.x < b.x;
+            });
+
+        for (size_t i = 0; i + 1 < active.size(); i += 2)
+        {
+            int xs = (int)ceil(active[i].x);
+            int xe = (int)floor(active[i + 1].x);
+
+            for (int x = xs; x <= xe; x++)
+                SetPixel(hdc, x, y, color);
+        }
+
+        for (auto& edge : active)
+            edge.x += edge.minv;
+    }
+}
+
+struct EdgeTableEntry
+{
+    int ymax;
+    double x;
+    double minv;
+};
+
+void InitNonConvexEdge(POINT v1, POINT v2,
+    vector<vector<EdgeTableEntry>>& table)
+{
+    if (v1.y == v2.y)
+        return;
+
+    if (v1.y > v2.y) {
+        Point temp = v1;
+        v1 = v2;
+        v2 = temp;
+    }
+    EdgeTableEntry edge;
+
+    edge.x = v1.x;
+    edge.ymax = v2.y;
+    edge.minv = (double)(v2.x - v1.x) / (v2.y - v1.y);
+
+    table[v1.y].push_back(edge);
+}
+
+void GeneralPolygonFill(HDC hdc, vector<Point>& p, COLORREF color)
+{
+    int n = p.size();
+    int ymax = 0;
+
+    for (int i = 0; i < n; i++)
+        ymax = max(ymax, p[i].y);
+
+    vector<vector<EdgeTableEntry>> table(ymax + 1);
+
+    for (int i = 0; i < n; i++)
+    {
+        InitNonConvexEdge(
+            p[i],
+            p[(i + 1) % n],
+            table
+        );
+    }
+
+    vector<EdgeTableEntry> active;
+
+    for (int y = 0; y <= ymax; y++)
+    {
+        for (auto& edge : table[y])
+            active.push_back(edge);
+
+        active.erase(
+            remove_if(active.begin(), active.end(),
+                [y](EdgeTableEntry& e)
+                {
+                    return y >= e.ymax;
+                }),
+            active.end()
+        );
+
+        sort(active.begin(), active.end(),
+            [](EdgeTableEntry& a, EdgeTableEntry& b)
+            {
+                return a.x < b.x;
+            });
+
+        for (int i = 0; i + 1 < active.size(); i += 2)
+        {
+            int xs = (int)ceil(active[i].x);
+            int xe = (int)floor(active[i + 1].x);
+
+            for (int x = xs; x <= xe; x++)
+                SetPixel(hdc, x, y, color);
+        }
+
+        for (auto& edge : active)
+            edge.x += edge.minv;
+    }
+}
+
+bool IsConvex(vector<Point>& p)
+{
+    int n = p.size();
+
+    if (n < 3)
+        return false;
+
+    int sign = 0;
+
+    for (int i = 0; i < n; i++)
+    {
+        Point a = p[i];
+        Point b = p[(i + 1) % n];
+        Point c = p[(i + 2) % n];
+
+        int dx1 = b.x - a.x;
+        int dy1 = b.y - a.y;
+
+        int dx2 = c.x - b.x;
+        int dy2 = c.y - b.y;
+
+        int cross = dx1 * dy2 - dy1 * dx2;
+
+        if (cross != 0)
+        {
+            if (sign == 0)
+                sign = (cross > 0) ? 1 : -1;
+            else if ((cross > 0 && sign < 0) ||
+                     (cross < 0 && sign > 0))
+                return false;
+        }
+    }
+
+    return true;
+}
 
 // ============================================================================
 // SHAPE RENDERING  (FIX 5: clipping modes also redraw clip window)
@@ -905,6 +1132,7 @@ void RenderShape(HDC hdc, const Shape& s) {
         DrawSadFace(hdc, s.x1, s.y1, R, s.color);
         break;
     }
+
     default: break;
     }
 }
@@ -974,13 +1202,17 @@ HMENU CreateMainMenu() {
     AppendMenu(hEllipse, MF_STRING, IDM_ELLIPSE_MIDPOINT, L"Midpoint Ellipse");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hEllipse, L"Ellipses");
 
+    HMENU hshape = CreatePopupMenu();
+    AppendMenu(hshape, MF_STRING, IDM_POLYGON_DRAW, L"Draw Polygon");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)hshape, L"shape");
+
     HMENU hFill = CreatePopupMenu();
     AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_LINES, L"Fill Circle with Lines");
     AppendMenu(hFill, MF_STRING, IDM_FILL_CIRCLES_CIRCLES, L"Fill Circle with Circles ");
     AppendMenu(hFill, MF_STRING, IDM_FILL_SQUARE_HERMITE, L"Fill Square with Hermite Curves");
     AppendMenu(hFill, MF_STRING, IDM_FILL_RECTANGLE_BEZIER, L"Fill Rectangle with Bezier Curves");
     AppendMenu(hFill, MF_STRING, IDM_CONVEX_FILL, L"Convex Fill");
-    AppendMenu(hFill, MF_STRING, IDM_NON_CONVEX_FILL, L"Non Convex Fill ");
+    AppendMenu(hFill, MF_STRING, IDM_NON_CONVEX_FILL, L"Non Convex Fill");
     AppendMenu(hFill, MF_STRING, IDM_FLOOD_FILL, L"Recursive Flood Fill");
     AppendMenu(hFill, MF_STRING, IDM_NRFLOOD_FILL, L"Non Recursive Flood Fill");
     AppendMenu(bar, MF_POPUP, (UINT_PTR)hFill, L"Filling");
@@ -1002,7 +1234,7 @@ HMENU CreateMainMenu() {
     HMENU hBouns = CreatePopupMenu();
     AppendMenu(hBouns, MF_STRING, IDM_HAPPY_FACE, L"Happy Face");
     AppendMenu(hBouns, MF_STRING, IDM_SAD_FACE, L"Sad Face");
-    AppendMenu(bar, MF_POPUP, (UINT_PTR)hBouns, L"Bouns");
+    AppendMenu(bar, MF_POPUP, (UINT_PTR)hBouns, L"Bonus");
 
     return bar;
 }
@@ -1134,18 +1366,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "Direct Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
             break;
         case IDM_ELLIPSE_POLAR:
-            g_currentMode = MODE_POLAR_ELLIPSE; g_firstClick = false;
+            g_currentMode = MODE_DIRECT_ELLIPSE; g_firstClick = false;
             cout << "Polar Ellipse Mode -> Click center , then click two points to form two radii a and b" << endl;
             break;
         case IDM_ELLIPSE_MIDPOINT:
             g_currentMode = MODE_MIDPOINT_ELLIPSE; g_firstClick = false;
             cout << "Midpoint Ellipse Mode -> Click center , then click a point to focus the ellipse" << endl;
             break;
+
             // Curves Menu
         case IDM_CARDINAL_SPLINE:
             g_currentMode = MODE_CARDINAL_SPLINE; g_firstClick = false;
             cout << "Cardinal Spline Curves Mode ->" << endl;
             break;
+
+        case IDM_POLYGON_DRAW:
+            g_currentMode = MODE_POLYGON_DRAW;
+            cout << "Polygon Draw Mode ->" << endl;
+            break;
+
             // Filling Menu
         case IDM_FILL_CIRCLES_LINES:
             g_currentMode = MODE_FILL_CIRCLE_WITH_LINES; g_firstClick = false;
@@ -1179,6 +1418,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_currentMode = MODE_NRFLOOD_FILL; g_firstClick = false;
             cout << " NON Recursive Flood Fill Mode ->" << endl;
             break;
+
             // Clipping Menu
         case IDM_CLIP_POINT:
             g_currentMode = MODE_CLIP_POINT; g_firstClick = false;
@@ -1281,14 +1521,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             cout << "  Point added (" << x << "," << y << ")" << endl;
             break;
         }
-        if (g_currentMode == MODE_CARDINAL_SPLINE) {
-            POINT pt = { x,y }; g_polygonPoints.push_back(pt);
-            HDC hdc = GetDC(hwnd);
-            SetPixel(hdc, x, y, g_drawColor);
-            ReleaseDC(hwnd, hdc);
-            cout << "Spline Point added(" << x << "," << y << ")" << endl;
-            break;
-        }
 
         if (g_currentMode == MODE_MIDPOINT_ELLIPSE ||
             g_currentMode == MODE_DIRECT_ELLIPSE||
@@ -1320,6 +1552,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             break;
         }
+
         if (g_currentMode == MODE_CLIP_CIRCLE_POINT)
         {
             HDC hdc = GetDC(hwnd);
@@ -1366,7 +1599,41 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
 
+        if (g_currentMode == MODE_POLYGON_DRAW)
+        {
+            static int requiredPoints = 0;          
+            if (requiredPoints == 0)
+            {
+                cout << "Enter number of polygon points: ";
+                cin >> requiredPoints;          
+                polygonPoints.clear();
 
+                cout << "Now click " << requiredPoints
+                     << " points on the screen." << endl;
+            }           
+            polygonPoints.push_back({ x, y });          
+            cout << "Point "
+                 << polygonPoints.size()
+                 << ": (" << x << "," << y << ")" << endl;
+
+            if (polygonPoints.size() == requiredPoints) {
+                HDC hdc = GetDC(hwnd);          
+                drawPolygon(hdc, polygonPoints, g_drawColor);
+
+                if (IsConvex(polygonPoints)) {
+                        ConvexFill(hdc, polygonPoints, g_drawColor);
+                    }
+                    else {
+                        GeneralPolygonFill(hdc, polygonPoints, g_drawColor);
+                    }
+
+                ReleaseDC(hwnd, hdc);           
+                cout << "Polygon Drawn Successfully!" << endl;          
+                polygonPoints.clear();
+                requiredPoints = 0;
+            }           
+            break;
+        }            
         // --- Two-click shapes ---
         if (!g_firstClick) {
             g_startX = x; g_startY = y; g_firstClick = true;
@@ -1458,16 +1725,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             DrawClipWindow(hdc,false);
             PolygonClip(hdc, g_polygonPoints,
                 g_clipX1, g_clipY1, g_RECclipX2, g_clipY2, g_drawColor);
-            ReleaseDC(hwnd, hdc);
-            g_polygonPoints.clear();
-        }
-        if (g_currentMode == MODE_CARDINAL_SPLINE && g_polygonPoints.size() >= 4) {
-            HDC hdc = GetDC(hwnd);
-            vector<Point> splinepts;
-            for (auto& p : g_polygonPoints) {
-                splinepts.push_back({p.x,p.y });
-            }
-            DrawCardinalSpline(hdc, splinepts.data(), (int)splinepts.size(), 0.5, g_drawColor);
             ReleaseDC(hwnd, hdc);
             g_polygonPoints.clear();
         }
