@@ -172,6 +172,7 @@ bool            g_polygonClipped = false;  // true once polygon is finalized via
 // Polygon draw mode storage
 vector<Point2D> g_drawPolygonPoints; // Polygon vertices for MODE_POLYGON_DRAW
 int             g_polygonRequiredPoints = 0;  // Number of vertices user requested
+vector<Point2D> g_savedPolygon;      // Last drawn polygon (for convex/non-convex fill modes)
 
 // Multi-point curve storage (Bezier 4-point, Hermite 4-point, Cardinal spline N-point)
 vector<Point2D> g_curvePoints;      // Current curve control points being collected
@@ -1017,7 +1018,7 @@ static void FloodFillRec(cairo_t* cr, int x, int y, Color fillColor, Color borde
     cairo_set_source_rgb(cr_off, g_backgroundColor.r, g_backgroundColor.g, g_backgroundColor.b);
     cairo_paint(cr_off);
     for (const auto& shape : g_shapes) {
-        if (shape.mode != MODE_FLOOD_FILL) {
+        if (shape.mode != MODE_FLOOD_FILL && shape.mode != MODE_NRFLOOD_FILL) {
             RenderShape(cr_off, shape);
         }
     }
@@ -1940,26 +1941,22 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
         break;
 
     case MODE_POLYGON_DRAW: {
-        if (!g_drawPolygonPoints.empty()) {
-            drawPolygon(cr, g_drawPolygonPoints, s.color);
-            if (IsConvex(g_drawPolygonPoints))
-                ConvexFill(cr, g_drawPolygonPoints, s.color);
-            else
-                GeneralPolygonFill(cr, g_drawPolygonPoints, s.color);
+        if (!g_savedPolygon.empty()) {
+            drawPolygon(cr, g_savedPolygon, s.color);
         }
         break;
     }
 
     case MODE_CONVEX_FILL: {
-        if (!g_drawPolygonPoints.empty() && IsConvex(g_drawPolygonPoints)) {
-            ConvexFill(cr, g_drawPolygonPoints, s.color);
+        if (!g_savedPolygon.empty() && IsConvex(g_savedPolygon)) {
+            ConvexFill(cr, g_savedPolygon, s.color);
         }
         break;
     }
 
     case MODE_NON_CONVEX_FILL: {
-        if (!g_drawPolygonPoints.empty()) {
-            GeneralPolygonFill(cr, g_drawPolygonPoints, s.color);
+        if (!g_savedPolygon.empty()) {
+            GeneralPolygonFill(cr, g_savedPolygon, s.color);
         }
         break;
     }
@@ -2412,6 +2409,42 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
         return TRUE;
     }
 
+    // ---- Mode: Convex Fill (single click, fills last polygon) ----
+    if (g_currentMode == MODE_CONVEX_FILL) {
+        if (g_savedPolygon.empty()) {
+            cout << "  No polygon saved. Draw one using Shape > Draw Polygon first." << endl;
+        } else if (!IsConvex(g_savedPolygon)) {
+            cout << "  Saved polygon is not convex. Use Non Convex Fill." << endl;
+        } else {
+            Shape s;
+            s.mode  = MODE_CONVEX_FILL;
+            s.color = g_drawColor;
+            s.x1    = x; s.y1 = y;
+            s.x2    = 0; s.y2 = 0;
+            g_shapes.push_back(s);
+            gtk_widget_queue_draw(widget);
+            cout << "  Convex fill applied." << endl;
+        }
+        return TRUE;
+    }
+
+    // ---- Mode: Non-Convex Fill (single click, fills last polygon) ----
+    if (g_currentMode == MODE_NON_CONVEX_FILL) {
+        if (g_savedPolygon.empty()) {
+            cout << "  No polygon saved. Draw one using Shape > Draw Polygon first." << endl;
+        } else {
+            Shape s;
+            s.mode  = MODE_NON_CONVEX_FILL;
+            s.color = g_drawColor;
+            s.x1    = x; s.y1 = y;
+            s.x2    = 0; s.y2 = 0;
+            g_shapes.push_back(s);
+            gtk_widget_queue_draw(widget);
+            cout << "  Non-convex fill applied." << endl;
+        }
+        return TRUE;
+    }
+
     // ---- Mode: Polygon Draw (N-click: reads required points from cin, then collects) ----
     if (g_currentMode == MODE_POLYGON_DRAW) {
         if (g_polygonRequiredPoints == 0) {
@@ -2426,6 +2459,7 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
              << ": (" << x << "," << y << ")" << endl;
 
         if ((int)g_drawPolygonPoints.size() == g_polygonRequiredPoints) {
+            g_savedPolygon = g_drawPolygonPoints;
             Shape s;
             s.mode  = MODE_POLYGON_DRAW;
             s.color = g_drawColor;
@@ -2434,8 +2468,9 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
             s.x2    = g_drawPolygonPoints.back().x;
             s.y2    = g_drawPolygonPoints.back().y;
             g_shapes.push_back(s);
-            cout << "Polygon Drawn Successfully!" << endl;
+            g_drawPolygonPoints.clear();
             g_polygonRequiredPoints = 0;
+            cout << "Polygon Drawn Successfully!" << endl;
             gtk_widget_queue_draw(widget);
         }
         return TRUE;
@@ -2606,6 +2641,7 @@ static void on_file_clear(GtkMenuItem* /*item*/, gpointer /*data*/) {
     g_curvePoints.clear();
     g_curveDrawn = false;
     g_drawPolygonPoints.clear();
+    g_savedPolygon.clear();
     g_polygonRequiredPoints = 0;
     g_firstClick = false;
     g_secondClick = false;
@@ -2930,13 +2966,13 @@ static void on_polygon_draw(GtkMenuItem*, gpointer) {
 static void on_convex_fill(GtkMenuItem*, gpointer) {
     g_currentMode = MODE_CONVEX_FILL;
     g_firstClick  = false;
-    cout << "\n[Convex Fill] Click two points for the bounding area." << endl;
+    cout << "\n[Convex Fill] Click once to fill the last polygon (convex only)." << endl;
 }
 
 static void on_non_convex_fill(GtkMenuItem*, gpointer) {
     g_currentMode = MODE_NON_CONVEX_FILL;
     g_firstClick  = false;
-    cout << "\n[Non Convex Fill] Click two points for the bounding area." << endl;
+    cout << "\n[Non Convex Fill] Click once to fill the last polygon." << endl;
 }
 
 static void on_nr_flood_fill(GtkMenuItem*, gpointer) {
