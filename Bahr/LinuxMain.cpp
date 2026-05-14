@@ -118,6 +118,12 @@ enum DrawMode {
     MODE_FILL_SQUARE_HERMITE,       // Fill square with Hermite curves
     MODE_HAPPY_FACE,                // Happy face (auto-proportioned, 2 clicks)
     MODE_SAD_FACE,                  // Sad face (auto-proportioned, 2 clicks)
+    MODE_POLYGON_DRAW,              // Draw and fill a polygon (N-click)
+    MODE_CONVEX_FILL,               // Convex polygon fill
+    MODE_NON_CONVEX_FILL,           // Non-convex (general) polygon fill
+    MODE_NRFLOOD_FILL,              // Non-recursive flood fill
+    MODE_SQUARE_CLIP_POINT,         // Point clipping against a square window
+    MODE_SQUARE_CLIP_LINE,          // Line clipping against a square window
 };
 
 // ============================================================================
@@ -163,6 +169,10 @@ vector<Point2D> g_polygonPoints;    // Polygon vertices being collected (left-cl
 vector<Point2D> g_polygonResult;    // Clipped polygon result (after Sutherland-Hodgman)
 bool            g_polygonClipped = false;  // true once polygon is finalized via right-click
 
+// Polygon draw mode storage
+vector<Point2D> g_drawPolygonPoints; // Polygon vertices for MODE_POLYGON_DRAW
+int             g_polygonRequiredPoints = 0;  // Number of vertices user requested
+
 // Multi-point curve storage (Bezier 4-point, Hermite 4-point, Cardinal spline N-point)
 vector<Point2D> g_curvePoints;      // Current curve control points being collected
 bool            g_curveDrawn = false;      // true once curve is completed
@@ -171,6 +181,7 @@ bool            g_curveDrawn = false;      // true once curve is completed
 // These define a yellow dashed rectangle used by MODE_CLIP_POINT, _LINE, _POLYGON.
 int g_clipX1 = 150, g_clipY1 = 150;   // Top-left corner of clip window
 int g_clipX2 = 600, g_clipY2 = 400;   // Bottom-right corner of clip window
+int g_SQUclipX2 = 400;                // Right edge for square clip window
 
 // GTK widget pointers (needed globally for menu callbacks to trigger redraws)
 GtkWidget* g_drawingArea = nullptr;  // The GtkDrawingArea where we render pixels
@@ -1130,6 +1141,165 @@ static void DrawCardinalSpline(cairo_t* cr, vector<Point2D>& pts, double c, Colo
 }
 
 // ============================================================================
+// POLYGON DRAW AND FILL ALGORITHMS (ported from Windows main.cpp)
+// ============================================================================
+
+// Edge record for scan-line polygon fill (convex)
+struct EdgeRec {
+    double x;
+    double minv;
+    int ymax;
+};
+
+static void InitEdgeRec(EdgeRec& edge, Point2D v1, Point2D v2) {
+    if (v1.y > v2.y) {
+        Point2D temp = v1;
+        v1 = v2;
+        v2 = temp;
+    }
+    edge.x = v1.x;
+    edge.ymax = v2.y;
+    if (v2.y - v1.y != 0)
+        edge.minv = (double)(v2.x - v1.x) / (v2.y - v1.y);
+}
+
+static void drawPolygon(cairo_t* cr, vector<Point2D>& p, Color c) {
+    int n = (int)p.size();
+    if (n < 3) return;
+    for (int i = 0; i < n; i++) {
+        Point2D p1 = p[i];
+        Point2D p2 = p[(i + 1) % n];
+        DrawLineDDA(cr, p1.x, p1.y, p2.x, p2.y, c);
+    }
+}
+
+static void ConvexFill(cairo_t* cr, vector<Point2D>& p, Color color) {
+    int n = (int)p.size();
+    if (n < 3) return;
+
+    int ymin = p[0].y;
+    int ymax = p[0].y;
+    for (int i = 1; i < n; i++) {
+        ymin = min(ymin, p[i].y);
+        ymax = max(ymax, p[i].y);
+    }
+
+    vector<vector<EdgeRec>> table(ymax + 1);
+
+    for (int i = 0; i < n; i++) {
+        Point2D v1 = p[i];
+        Point2D v2 = p[(i + 1) % n];
+        if (v1.y == v2.y) continue;
+        EdgeRec edge;
+        InitEdgeRec(edge, v1, v2);
+        table[min(v1.y, v2.y)].push_back(edge);
+    }
+
+    vector<EdgeRec> active;
+    for (int y = ymin; y < ymax; y++) {
+        for (auto& edge : table[y])
+            active.push_back(edge);
+
+        active.erase(
+            remove_if(active.begin(), active.end(),
+                [y](EdgeRec& e) { return y >= e.ymax; }),
+            active.end());
+
+        sort(active.begin(), active.end(),
+            [](EdgeRec& a, EdgeRec& b) { return a.x < b.x; });
+
+        for (size_t i = 0; i + 1 < active.size(); i += 2) {
+            int xs = (int)ceil(active[i].x);
+            int xe = (int)floor(active[i + 1].x);
+            for (int x = xs; x <= xe; x++)
+                SetPixel(cr, x, y, color);
+        }
+
+        for (auto& edge : active)
+            edge.x += edge.minv;
+    }
+}
+
+// Edge table entry for general (non-convex) polygon fill
+struct EdgeTableEntry {
+    int ymax;
+    double x;
+    double minv;
+};
+
+static void InitNonConvexEdge(Point2D v1, Point2D v2,
+                               vector<vector<EdgeTableEntry>>& table) {
+    if (v1.y == v2.y) return;
+    if (v1.y > v2.y) {
+        Point2D temp = v1;
+        v1 = v2;
+        v2 = temp;
+    }
+    EdgeTableEntry edge;
+    edge.x = v1.x;
+    edge.ymax = v2.y;
+    edge.minv = (double)(v2.x - v1.x) / (v2.y - v1.y);
+    table[v1.y].push_back(edge);
+}
+
+static void GeneralPolygonFill(cairo_t* cr, vector<Point2D>& p, Color color) {
+    int n = (int)p.size();
+    int ymax = 0;
+    for (int i = 0; i < n; i++)
+        ymax = max(ymax, p[i].y);
+
+    vector<vector<EdgeTableEntry>> table(ymax + 1);
+
+    for (int i = 0; i < n; i++)
+        InitNonConvexEdge(p[i], p[(i + 1) % n], table);
+
+    vector<EdgeTableEntry> active;
+    for (int y = 0; y <= ymax; y++) {
+        for (auto& edge : table[y])
+            active.push_back(edge);
+
+        active.erase(
+            remove_if(active.begin(), active.end(),
+                [y](EdgeTableEntry& e) { return y >= e.ymax; }),
+            active.end());
+
+        sort(active.begin(), active.end(),
+            [](EdgeTableEntry& a, EdgeTableEntry& b) { return a.x < b.x; });
+
+        for (size_t i = 0; i + 1 < active.size(); i += 2) {
+            int xs = (int)ceil(active[i].x);
+            int xe = (int)floor(active[i + 1].x);
+            for (int x = xs; x <= xe; x++)
+                SetPixel(cr, x, y, color);
+        }
+
+        for (auto& edge : active)
+            edge.x += edge.minv;
+    }
+}
+
+static bool IsConvex(vector<Point2D>& p) {
+    int n = (int)p.size();
+    if (n < 3) return false;
+    int sign = 0;
+    for (int i = 0; i < n; i++) {
+        Point2D a = p[i];
+        Point2D b = p[(i + 1) % n];
+        Point2D c = p[(i + 2) % n];
+        int dx1 = b.x - a.x, dy1 = b.y - a.y;
+        int dx2 = c.x - b.x, dy2 = c.y - b.y;
+        int cross = dx1 * dy2 - dy1 * dx2;
+        if (cross != 0) {
+            if (sign == 0)
+                sign = (cross > 0) ? 1 : -1;
+            else if ((cross > 0 && sign < 0) || (cross < 0 && sign > 0))
+                return false;
+        }
+    }
+    return true;
+}
+
+// ============================================================================
 // CLIPPING: CLIP WINDOW
 // ============================================================================
 /**
@@ -1142,14 +1312,15 @@ static void DrawCardinalSpline(cairo_t* cr, vector<Point2D>& pts, double c, Colo
  *   - Line Clipping (Cohen-Sutherland)
  *   - Polygon Clipping (Sutherland-Hodgman)
  */
-static void DrawClipWindow(cairo_t* cr) {
+static void DrawClipWindow(cairo_t* cr, bool square = false) {
+    int x2 = square ? g_SQUclipX2 : g_clipX2;
     cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);          // Yellow color
     const double dashes[] = {4.0, 4.0};                // Dash pattern: 4px on, 4px off
     cairo_set_dash(cr, dashes, 2, 0.0);                // Enable dashed lines
     cairo_set_line_width(cr, 1.0);                     // 1px wide
     cairo_rectangle(cr,
                     g_clipX1, g_clipY1,                         // Top-left
-                    g_clipX2 - g_clipX1, g_clipY2 - g_clipY1);  // Width × Height
+                    x2 - g_clipX1, g_clipY2 - g_clipY1);        // Width × Height
     cairo_stroke(cr);                                   // Draw the rectangle
     cairo_set_dash(cr, nullptr, 0, 0.0);                // Reset dash (solid lines again)
 }
@@ -1751,6 +1922,48 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
         break;
     }
 
+    case MODE_NRFLOOD_FILL: {
+        FloodFillRec(cr, s.x1, s.y1, s.color, s.color);
+        break;
+    }
+
+    case MODE_SQUARE_CLIP_POINT:
+        DrawClipWindow(cr, true);
+        PointClipping(cr, s.x1, s.y1,
+                      g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2, s.color);
+        break;
+
+    case MODE_SQUARE_CLIP_LINE:
+        DrawClipWindow(cr, true);
+        CohenSuth(cr, s.x1, s.y1, s.x2, s.y2,
+                  g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2, s.color);
+        break;
+
+    case MODE_POLYGON_DRAW: {
+        if (!g_drawPolygonPoints.empty()) {
+            drawPolygon(cr, g_drawPolygonPoints, s.color);
+            if (IsConvex(g_drawPolygonPoints))
+                ConvexFill(cr, g_drawPolygonPoints, s.color);
+            else
+                GeneralPolygonFill(cr, g_drawPolygonPoints, s.color);
+        }
+        break;
+    }
+
+    case MODE_CONVEX_FILL: {
+        if (!g_drawPolygonPoints.empty() && IsConvex(g_drawPolygonPoints)) {
+            ConvexFill(cr, g_drawPolygonPoints, s.color);
+        }
+        break;
+    }
+
+    case MODE_NON_CONVEX_FILL: {
+        if (!g_drawPolygonPoints.empty()) {
+            GeneralPolygonFill(cr, g_drawPolygonPoints, s.color);
+        }
+        break;
+    }
+
     default:
         // MODE_NONE and any unhandled modes: do nothing
         break;
@@ -1795,11 +2008,15 @@ static gboolean on_draw(GtkWidget* /*widget*/, cairo_t* cr,
     if (g_currentMode == MODE_CLIP_POINT ||
         g_currentMode == MODE_CLIP_LINE ||
         g_currentMode == MODE_CLIP_POLYGON) {
-        DrawClipWindow(cr);
+        DrawClipWindow(cr, false);
+    }
+    if (g_currentMode == MODE_SQUARE_CLIP_POINT ||
+        g_currentMode == MODE_SQUARE_CLIP_LINE) {
+        DrawClipWindow(cr, true);
     }
     // Also show clip window if there are clipped polygon results
     if (g_polygonClipped) {
-        DrawClipWindow(cr);
+        DrawClipWindow(cr, false);
     }
 
     // ---- Step 4: Draw polygon point markers (while collecting) ----
@@ -2150,6 +2367,80 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
         return TRUE;
     }
 
+    // ---- Mode: Square Point Clipping (single click) ----
+    if (g_currentMode == MODE_SQUARE_CLIP_POINT) {
+        Shape s;
+        s.mode  = MODE_SQUARE_CLIP_POINT;
+        s.color = g_drawColor;
+        s.x1    = x; s.y1 = y;
+        s.x2    = 0; s.y2 = 0;
+        g_shapes.push_back(s);
+        gtk_widget_queue_draw(widget);
+        return TRUE;
+    }
+
+    // ---- Mode: Square Line Clipping Click #1 ----
+    if (g_currentMode == MODE_SQUARE_CLIP_LINE) {
+        if (!g_firstClick) {
+            g_startX = x; g_startY = y;
+            g_firstClick = true;
+            cout << "  First point: (" << x << "," << y << ")" << endl;
+        } else {
+            g_firstClick = false;
+            Shape s;
+            s.mode  = MODE_SQUARE_CLIP_LINE;
+            s.color = g_drawColor;
+            s.x1    = g_startX; s.y1 = g_startY;
+            s.x2    = x; s.y2 = y;
+            g_shapes.push_back(s);
+            gtk_widget_queue_draw(widget);
+            cout << "  Square Line clipped." << endl;
+        }
+        return TRUE;
+    }
+
+    // ---- Mode: Non-Recursive Flood Fill (single click) ----
+    if (g_currentMode == MODE_NRFLOOD_FILL) {
+        Shape s;
+        s.mode  = MODE_NRFLOOD_FILL;
+        s.color = g_drawColor;
+        s.x1    = x; s.y1 = y;
+        s.x2    = 0; s.y2 = 0;
+        g_shapes.push_back(s);
+        gtk_widget_queue_draw(widget);
+        cout << "  Non-recursive flood fill at (" << x << ", " << y << ")" << endl;
+        return TRUE;
+    }
+
+    // ---- Mode: Polygon Draw (N-click: reads required points from cin, then collects) ----
+    if (g_currentMode == MODE_POLYGON_DRAW) {
+        if (g_polygonRequiredPoints == 0) {
+            cout << "Enter number of polygon points: ";
+            cin >> g_polygonRequiredPoints;
+            g_drawPolygonPoints.clear();
+            cout << "Now click " << g_polygonRequiredPoints
+                 << " points on the screen." << endl;
+        }
+        g_drawPolygonPoints.push_back(Point2D(x, y));
+        cout << "Point " << g_drawPolygonPoints.size()
+             << ": (" << x << "," << y << ")" << endl;
+
+        if ((int)g_drawPolygonPoints.size() == g_polygonRequiredPoints) {
+            Shape s;
+            s.mode  = MODE_POLYGON_DRAW;
+            s.color = g_drawColor;
+            s.x1    = g_drawPolygonPoints[0].x;
+            s.y1    = g_drawPolygonPoints[0].y;
+            s.x2    = g_drawPolygonPoints.back().x;
+            s.y2    = g_drawPolygonPoints.back().y;
+            g_shapes.push_back(s);
+            cout << "Polygon Drawn Successfully!" << endl;
+            g_polygonRequiredPoints = 0;
+            gtk_widget_queue_draw(widget);
+        }
+        return TRUE;
+    }
+
     // ---- Two-click modes (Lines, Circles, Curves, Fills, Line Clipping, etc.) ----
     if (!g_firstClick) {
         // FIRST CLICK: Store the start point
@@ -2314,6 +2605,8 @@ static void on_file_clear(GtkMenuItem* /*item*/, gpointer /*data*/) {
     g_polygonClipped = false;
     g_curvePoints.clear();
     g_curveDrawn = false;
+    g_drawPolygonPoints.clear();
+    g_polygonRequiredPoints = 0;
     g_firstClick = false;
     g_secondClick = false;
     gtk_widget_queue_draw(g_drawingArea);
@@ -2625,6 +2918,47 @@ static void on_sad_face(GtkMenuItem*, gpointer) {
     cout << "\n[Sad Face] Click center, then a radius point." << endl;
 }
 
+// ---- New algorithm callbacks (ported from Windows main.cpp) ----
+static void on_polygon_draw(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_POLYGON_DRAW;
+    g_firstClick  = false;
+    g_polygonRequiredPoints = 0;
+    g_drawPolygonPoints.clear();
+    cout << "\n[Polygon Draw] Enter number of points, then click them." << endl;
+}
+
+static void on_convex_fill(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_CONVEX_FILL;
+    g_firstClick  = false;
+    cout << "\n[Convex Fill] Click two points for the bounding area." << endl;
+}
+
+static void on_non_convex_fill(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_NON_CONVEX_FILL;
+    g_firstClick  = false;
+    cout << "\n[Non Convex Fill] Click two points for the bounding area." << endl;
+}
+
+static void on_nr_flood_fill(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_NRFLOOD_FILL;
+    g_firstClick  = false;
+    cout << "\n[Non-Recursive Flood Fill] Click a point to start filling." << endl;
+}
+
+static void on_square_clip_point(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_SQUARE_CLIP_POINT;
+    g_firstClick  = false;
+    g_polygonPoints.clear();
+    gtk_widget_queue_draw(g_drawingArea);
+    cout << "\n[Square Point Clipping] Click a point to test against the square window." << endl;
+}
+
+static void on_square_clip_line(GtkMenuItem*, gpointer) {
+    g_currentMode = MODE_SQUARE_CLIP_LINE;
+    g_firstClick  = false;
+    cout << "\n[Square Line Clipping] Click two points for line clipped to square window." << endl;
+}
+
 // ============================================================================
 // MENU BUILDER
 // ============================================================================
@@ -2818,6 +3152,20 @@ static GtkWidget* build_menu_bar() {
     gtk_menu_shell_append(GTK_MENU_SHELL(bar), ellipse_item);
 
     // ====================================================================
+    // SHAPE MENU
+    // ====================================================================
+    GtkWidget* shape_menu = gtk_menu_new();
+    GtkWidget* shape_item = gtk_menu_item_new_with_label("Shape");
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(shape_item), shape_menu);
+
+        GtkWidget* poly_draw_item = gtk_menu_item_new_with_label("Draw Polygon");
+        g_signal_connect(poly_draw_item, "activate",
+                         G_CALLBACK(on_polygon_draw), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(shape_menu), poly_draw_item);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(bar), shape_item);
+
+    // ====================================================================
     // FILLING MENU
     // ====================================================================
     GtkWidget* fill_menu = gtk_menu_new();
@@ -2848,6 +3196,21 @@ static GtkWidget* build_menu_bar() {
         g_signal_connect(fill_herm_item, "activate",
                          G_CALLBACK(on_fill_square_hermite), nullptr);
         gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), fill_herm_item);
+
+        GtkWidget* conv_fill_item = gtk_menu_item_new_with_label("Convex Fill");
+        g_signal_connect(conv_fill_item, "activate",
+                         G_CALLBACK(on_convex_fill), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), conv_fill_item);
+
+        GtkWidget* nonconv_fill_item = gtk_menu_item_new_with_label("Non Convex Fill");
+        g_signal_connect(nonconv_fill_item, "activate",
+                         G_CALLBACK(on_non_convex_fill), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), nonconv_fill_item);
+
+        GtkWidget* nr_flood_item = gtk_menu_item_new_with_label("Non Recursive Flood Fill");
+        g_signal_connect(nr_flood_item, "activate",
+                         G_CALLBACK(on_nr_flood_fill), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(fill_menu), nr_flood_item);
 
     gtk_menu_shell_append(GTK_MENU_SHELL(bar), fill_item);
 
@@ -2906,6 +3269,16 @@ static GtkWidget* build_menu_bar() {
         g_signal_connect(ccl_item, "activate",
                          G_CALLBACK(on_clip_circle_line), nullptr);
         gtk_menu_shell_append(GTK_MENU_SHELL(clip_menu), ccl_item);
+
+        GtkWidget* sqcp_item = gtk_menu_item_new_with_label("Square Point Clipping");
+        g_signal_connect(sqcp_item, "activate",
+                         G_CALLBACK(on_square_clip_point), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(clip_menu), sqcp_item);
+
+        GtkWidget* sqcl_item = gtk_menu_item_new_with_label("Square Line Clipping");
+        g_signal_connect(sqcl_item, "activate",
+                         G_CALLBACK(on_square_clip_line), nullptr);
+        gtk_menu_shell_append(GTK_MENU_SHELL(clip_menu), sqcl_item);
 
     gtk_menu_shell_append(GTK_MENU_SHELL(bar), clip_item);
 
