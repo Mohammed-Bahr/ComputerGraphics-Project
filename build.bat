@@ -4,7 +4,6 @@ REM Requires MinGW with g++ in PATH
 
 echo ================================
 echo Computer Graphics Project Build
-echo Person 3 Implementation
 echo ================================
 echo.
 
