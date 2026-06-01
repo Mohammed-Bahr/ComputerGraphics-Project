@@ -173,6 +173,7 @@ bool            g_polygonClipped = false;  // true once polygon is finalized via
 vector<Point2D> g_drawPolygonPoints; // Polygon vertices for MODE_POLYGON_DRAW
 int             g_polygonRequiredPoints = 0;  // Number of vertices user requested
 vector<Point2D> g_savedPolygon;      // Last drawn polygon (for convex/non-convex fill modes)
+int             g_clipPolygonRequiredPoints = 0;  // Number of vertices for polygon clipping
 
 // Multi-point curve storage (Bezier 4-point, Hermite 4-point, Cardinal spline N-point)
 vector<Point2D> g_curvePoints;      // Current curve control points being collected
@@ -1075,50 +1076,65 @@ static void FloodFillRec(cairo_t* cr, int x, int y, Color fillColor, Color borde
 // ============================================================================
 // ALGORITHM: DRAW HAPPY FACE (Auto-proportioned)
 // ============================================================================
-// Draws a happy face from 2 clicks (center + radius).
-// Eyes, nose, and smile are positioned automatically.
+// ALGORITHM: DRAW SAD FACE (Auto-proportioned, 2 clicks)
+// ============================================================================
+// Draws a sad face from center + radius. Eyes, nose, and frown are
+// positioned automatically relative to the circle size.
+//   - Eye radius = R/8, placed at R/3 offset horizontally, R/4 above center
+//   - Nose = vertical line from eyes down to R/6 below center
+//   - Mouth = Bezier curve, R/3 below center, width = 4R/3, concave down
 static void DrawSadFace(cairo_t* cr, int xc, int yc, int R, Color color) {
     if (R <= 0) return;
 
+    // Face outline (circle)
     DrawCircleDirect(cr, xc, yc, R, color);
 
+    // Eye properties: proportional to face size
     int eyeR = max(1, R / 8);
     int eyeOffX = R / 3;
     int eyeY = yc - R / 4;
 
+    // Left and right eyes
     DrawCircleDirect(cr, xc - eyeOffX, eyeY, eyeR, color);
     DrawCircleDirect(cr, xc + eyeOffX, eyeY, eyeR, color);
 
+    // Nose (vertical line between eyes)
     DrawLineDDA(cr, xc, eyeY + eyeR, xc, yc + R / 6, color);
 
+    // Frown (Bezier curve with control points pulled upward)
     int mouthY = yc + R / 3;
     int mouthW = R * 2 / 3;
-    Point2D m0 = {xc - mouthW, mouthY};
-    Point2D m3 = {xc + mouthW, mouthY};
-    Point2D m1 = {xc - mouthW / 2, mouthY - R / 4};
-    Point2D m2 = {xc + mouthW / 2, mouthY - R / 4};
+    Point2D m0 = {xc - mouthW, mouthY};       // Left corner
+    Point2D m3 = {xc + mouthW, mouthY};       // Right corner
+    Point2D m1 = {xc - mouthW / 2, mouthY - R / 4};  // Left control (pulls up)
+    Point2D m2 = {xc + mouthW / 2, mouthY - R / 4};  // Right control (pulls up)
     DrawBezier(cr, m0, m1, m2, m3, color);
 }
 
 // ============================================================================
-// ALGORITHM: DRAW SAD FACE (Auto-proportioned)
+// ALGORITHM: DRAW HAPPY FACE (Auto-proportioned, 2 clicks)
 // ============================================================================
-// Draws a sad face from 2 clicks (center + radius).
-// Eyes, nose, and frown are positioned automatically.
+// Draws a happy face from center + radius. Same proportions as DrawSadFace
+// but the mouth Bezier curves downward (convex) for a smile.
 static void DrawHappyFace(cairo_t* cr, int xc, int yc, int R, Color color) {
     if (R <= 0) return;
 
+    // Face outline (circle)
     DrawCircleDirect(cr, xc, yc, R, color);
 
+    // Eye properties: proportional to face size
     int eyeR = max(1, R / 8);
     int eyeOffX = R / 3;
     int eyeY = yc - R / 4;
 
+    // Left and right eyes
     DrawCircleDirect(cr, xc - eyeOffX, eyeY, eyeR, color);
     DrawCircleDirect(cr, xc + eyeOffX, eyeY, eyeR, color);
 
+    // Nose (vertical line between eyes)
     DrawLineDDA(cr, xc, eyeY + eyeR, xc, yc + R / 6, color);
 
+    // Smile (Bezier curve with control points pulled downward)
     int mouthY = yc + R / 3;
     int mouthW = R * 2 / 3;
     Point2D m0 = {xc - mouthW, mouthY};
@@ -1127,6 +1143,8 @@ static void DrawHappyFace(cairo_t* cr, int xc, int yc, int R, Color color) {
     Point2D m2 = {xc + mouthW / 2, mouthY + R / 4};
     DrawBezier(cr, m0, m1, m2, m3, color);
 }
+// ============================================================================
+// ALGORITHM: CARDINAL SPLINE CURVE
 // ============================================================================
 static void DrawCardinalSpline(cairo_t* cr, vector<Point2D>& pts, double c, Color color) {
     int n = (int)pts.size();
@@ -1341,8 +1359,7 @@ static void DrawClipWindow(cairo_t* cr, bool square = false) {
  * @param xr, yb    Bottom-right corner of clip window
  * @param color     Drawing color
  */
-static void PointClipping(cairo_t* cr, int x, int y,
-                          int xl, int yt, int xr, int yb, Color color) {
+static void PointClipping(cairo_t* cr, int x, int y, int xl, int yt, int xr, int yb, Color color) {
     if (x >= xl && x <= xr && y >= yt && y <= yb) {
         // Point is inside: draw a small cross marker (5×5 pixel block)
         for (int dx = -2; dx <= 2; dx++)
@@ -1449,9 +1466,7 @@ static void HIntersect(double xs, double ys, double xe, double ye,
  * Clips line from (xs,ys) to (xe,ye) to the rectangular window.
  * Draws the clipped portion (if any) using Cairo line primitives.
  */
-static void CohenSuth(cairo_t* cr,
-                      int xs, int ys, int xe, int ye,
-                      int xl, int yt, int xr, int yb, Color color) {
+static void CohenSuth(cairo_t* cr, int xs, int ys, int xe, int ye, int xl, int yt, int xr, int yb, Color color) {
     double x1 = xs, y1 = ys, x2 = xe, y2 = ye;
     OutCode o1 = GetOutCode(x1, y1, xl, yt, xr, yb);
     OutCode o2 = GetOutCode(x2, y2, xl, yt, xr, yb);
@@ -1694,6 +1709,60 @@ static void LineCircleClip(cairo_t* cr, int xc, int yc,
     }
 }
 
+
+// static void LineCircleClip(cairo_t* cr,
+//                                      int xc, int yc,   // Circle center
+//                                      int x1, int y1,   // Start point (inside)
+//                                      int x2, int y2,   // End point (outside)
+//                                      int R,
+//                                      Color color)
+// {
+//     // Direction vector of the line
+//     double dx = x2 - x1;
+//     double dy = y2 - y1;
+
+//     // Line equation:
+//     // P(t) = (x1,y1) + t(dx,dy)
+//     //
+//     // Find t where line intersects circle:
+//     // (x - xc)^2 + (y - yc)^2 = R^2
+
+//     double a = dx * dx + dy * dy;
+
+//     double b = 2 * (
+//         dx * (x1 - xc) +
+//         dy * (y1 - yc)
+//     );
+
+//     double c =
+//         (x1 - xc) * (x1 - xc) +
+//         (y1 - yc) * (y1 - yc) -
+//         R * R;
+
+//     // Quadratic discriminant
+//     double discriminant = b * b - 4 * a * c;
+
+//     if (discriminant < 0)
+//         return; // No intersection
+
+//     discriminant = sqrt(discriminant);
+
+//     // Two possible intersections
+//     double t1 = (-b + discriminant) / (2 * a);
+//     double t2 = (-b - discriminant) / (2 * a);
+
+//     // We want the farther positive intersection
+//     double t = max(t1, t2);
+
+//     // Intersection point
+//     int xi = Round(x1 + t * dx);
+//     int yi = Round(y1 + t * dy);
+
+//     // Draw from inside point to border intersection
+//     DrawLineDDA(cr, x1, y1, xi, yi, color);
+// }
+
+
 // ============================================================================
 // SHAPE RENDERING DISPATCHER
 // ============================================================================
@@ -1882,6 +1951,7 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
         if (g_curvePoints.size() >= 4) {
             DrawHermite(cr, g_curvePoints[0], g_curvePoints[1],
                         g_curvePoints[2], g_curvePoints[3], s.color);
+            g_curvePoints.clear();
         }
         break;
     }
@@ -1940,12 +2010,11 @@ static void RenderShape(cairo_t* cr, const Shape& s) {
                   g_clipX1, g_clipY1, g_SQUclipX2, g_clipY2, s.color);
         break;
 
-    case MODE_POLYGON_DRAW: {
-        if (!g_savedPolygon.empty()) {
-            drawPolygon(cr, g_savedPolygon, s.color);
-        }
+    case MODE_POLYGON_DRAW:
+        // No-op: edges are stored as individual MODE_DDA_LINE shapes
+        // for save/load persistence. g_savedPolygon is used only for
+        // convex/non-convex fill modes and is not serialized.
         break;
-    }
 
     case MODE_CONVEX_FILL: {
         if (!g_savedPolygon.empty() && IsConvex(g_savedPolygon)) {
@@ -2079,75 +2148,25 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
     // ====================================================================
     // RIGHT-CLICK HANDLER
     // ====================================================================
-    // Used to finalize polygon clipping (finish collecting vertices)
     if (event->button == GDK_BUTTON_SECONDARY) {
-        // Only process if in polygon clip mode and we have enough points
-        if (g_currentMode == MODE_CLIP_POLYGON && g_polygonPoints.size() >= 3) {
-            // Step 1: Store the original (unclipped) polygon edges as line shapes
-            // This preserves the user's original polygon for redrawing
-            size_t n = g_polygonPoints.size();
-            for (size_t i = 0; i < n; i++) {
-                Shape edge;
-                edge.mode  = MODE_DDA_LINE;
-                edge.color = g_drawColor;
-                edge.x1    = g_polygonPoints[i].x;
-                edge.y1    = g_polygonPoints[i].y;
-                edge.x2    = g_polygonPoints[(i + 1) % n].x;
-                edge.y2    = g_polygonPoints[(i + 1) % n].y;
-                g_shapes.push_back(edge);
-            }
-
-            // Step 2: Run Sutherland-Hodgman algorithm to compute clipped vertices
-            vector<Point2D> clipped;
-            {
-                // Convert int points to Vertex (double) for precise math
-                vector<Vertex> vl;
-                for (auto& p : g_polygonPoints)
-                    vl.push_back(Vertex(p.x, p.y));
-
-                // Pipeline: clip against all 4 edges
-                vl = ClipEdge(vl, g_clipX1, InLeft,   VIsectPoly);
-                vl = ClipEdge(vl, g_clipY1, InTop,    HIsectPoly);
-                vl = ClipEdge(vl, g_clipX2, InRight,  VIsectPoly);
-                vl = ClipEdge(vl, g_clipY2, InBottom, HIsectPoly);
-
-                // Convert back to integer points
-                for (auto& v : vl)
-                    clipped.push_back(Point2D(Round(v.x), Round(v.y)));
-
-                cout << "  Polygon clipped with " << vl.size() << " vertices." << endl;
-            }
-
-            // Step 3: Store the clipped result for redrawing
-            if (clipped.size() >= 2) {
-                g_polygonResult = clipped;
-                g_polygonClipped = true;
-            }
-
-            // Step 4: Clear temporary vertex storage and request redraw
-            g_polygonPoints.clear();
+        // ---- Cardinal Spline finalization via right-click ----
+        if (g_currentMode == MODE_CARDINAL_SPLINE &&
+            g_curvePoints.size() >= 4) {
+            g_curveDrawn = true;
+            Shape s;
+            s.mode  = MODE_CARDINAL_SPLINE;
+            s.color = g_drawColor;
+            s.x1    = g_curvePoints[0].x;
+            s.y1    = g_curvePoints[0].y;
+            s.x2    = g_curvePoints.back().x;
+            s.y2    = g_curvePoints.back().y;
+            g_shapes.push_back(s);
+            g_curvePoints.push_back(g_curvePoints.back());
             gtk_widget_queue_draw(widget);
+            cout << "  Cardinal Spline drawn." << endl;
+            return TRUE;
         }
-        return TRUE;  // Right-click always handled (prevents context menus)
-    }
-
-    // ---- Cardinal Spline / Curve finalization via right-click ----
-    if (event->button == GDK_BUTTON_SECONDARY &&
-        g_currentMode == MODE_CARDINAL_SPLINE &&
-        g_curvePoints.size() >= 4) {
-        g_curveDrawn = true;
-        Shape s;
-        s.mode  = MODE_CARDINAL_SPLINE;
-        s.color = g_drawColor;
-        s.x1    = g_curvePoints[0].x;
-        s.y1    = g_curvePoints[0].y;
-        s.x2    = g_curvePoints.back().x;
-        s.y2    = g_curvePoints.back().y;
-        g_shapes.push_back(s);
-        g_curvePoints.push_back(g_curvePoints.back());
-        gtk_widget_queue_draw(widget);
-        cout << "  Cardinal Spline drawn." << endl;
-        return TRUE;
+        return TRUE;  // Prevent context menus
     }
 
     // ====================================================================
@@ -2174,11 +2193,48 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
         return TRUE;
     }
 
-    // ---- Mode: Polygon Clipping (collect vertices) ----
+    // ---- Mode: Polygon Clipping (N-click: reads required points from cin, then collects) ----
     if (g_currentMode == MODE_CLIP_POLYGON) {
+        if (g_clipPolygonRequiredPoints == 0) {
+            cout << "Enter number of polygon points for clipping: ";
+            cin >> g_clipPolygonRequiredPoints;
+            g_polygonPoints.clear();
+            cout << "Now click " << g_clipPolygonRequiredPoints
+                 << " points on the screen." << endl;
+        }
         g_polygonPoints.push_back(Point2D(x, y));
-        gtk_widget_queue_draw(widget);
-        cout << "  Point added (" << x << "," << y << ")" << endl;
+        cout << "Point " << g_polygonPoints.size()
+             << ": (" << x << "," << y << ")" << endl;
+
+        if ((int)g_polygonPoints.size() == g_clipPolygonRequiredPoints) {
+            // Run Sutherland-Hodgman algorithm to compute clipped vertices
+            vector<Point2D> clipped;
+            {
+                vector<Vertex> vl;
+                for (auto& p : g_polygonPoints)
+                    vl.push_back(Vertex(p.x, p.y));
+
+                vl = ClipEdge(vl, g_clipX1, InLeft,   VIsectPoly);
+                vl = ClipEdge(vl, g_clipY1, InTop,    HIsectPoly);
+                vl = ClipEdge(vl, g_clipX2, InRight,  VIsectPoly);
+                vl = ClipEdge(vl, g_clipY2, InBottom, HIsectPoly);
+
+                for (auto& v : vl)
+                    clipped.push_back(Point2D(Round(v.x), Round(v.y)));
+
+                cout << "  Polygon clipped with " << vl.size() << " vertices." << endl;
+            }
+
+            if (clipped.size() >= 2) {
+                g_polygonResult = clipped;
+                g_polygonClipped = true;
+            }
+
+            g_polygonPoints.clear();
+            g_clipPolygonRequiredPoints = 0;
+            gtk_widget_queue_draw(widget);
+            cout << "Polygon Clipping Complete!" << endl;
+        }
         return TRUE;
     }
 
@@ -2460,14 +2516,18 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
 
         if ((int)g_drawPolygonPoints.size() == g_polygonRequiredPoints) {
             g_savedPolygon = g_drawPolygonPoints;
-            Shape s;
-            s.mode  = MODE_POLYGON_DRAW;
-            s.color = g_drawColor;
-            s.x1    = g_drawPolygonPoints[0].x;
-            s.y1    = g_drawPolygonPoints[0].y;
-            s.x2    = g_drawPolygonPoints.back().x;
-            s.y2    = g_drawPolygonPoints.back().y;
-            g_shapes.push_back(s);
+            // Store each polygon edge as a DDA_LINE shape for save/load persistence
+            size_t n = g_drawPolygonPoints.size();
+            for (size_t i = 0; i < n; i++) {
+                Shape edge;
+                edge.mode  = MODE_DDA_LINE;
+                edge.color = g_drawColor;
+                edge.x1    = g_drawPolygonPoints[i].x;
+                edge.y1    = g_drawPolygonPoints[i].y;
+                edge.x2    = g_drawPolygonPoints[(i + 1) % n].x;
+                edge.y2    = g_drawPolygonPoints[(i + 1) % n].y;
+                g_shapes.push_back(edge);
+            }
             g_drawPolygonPoints.clear();
             g_polygonRequiredPoints = 0;
             cout << "Polygon Drawn Successfully!" << endl;
@@ -2643,6 +2703,7 @@ static void on_file_clear(GtkMenuItem* /*item*/, gpointer /*data*/) {
     g_drawPolygonPoints.clear();
     g_savedPolygon.clear();
     g_polygonRequiredPoints = 0;
+    g_clipPolygonRequiredPoints = 0;
     g_firstClick = false;
     g_secondClick = false;
     gtk_widget_queue_draw(g_drawingArea);
@@ -2862,8 +2923,9 @@ static void on_clip_polygon(GtkMenuItem*, gpointer) {
     g_firstClick  = false;
     g_secondClick = false;
     g_polygonPoints.clear();
+    g_clipPolygonRequiredPoints = 0;
     gtk_widget_queue_draw(g_drawingArea);  // Show clip window overlay
-    cout << "\n[Polygon Clipping] Left-click to add points, right-click to finish." << endl;
+    cout << "\n[Polygon Clipping] Enter number of points, then click them to clip." << endl;
 }
 
 static void on_clip_circle_point(GtkMenuItem*, gpointer) {
@@ -2960,6 +3022,7 @@ static void on_polygon_draw(GtkMenuItem*, gpointer) {
     g_firstClick  = false;
     g_polygonRequiredPoints = 0;
     g_drawPolygonPoints.clear();
+    g_clipPolygonRequiredPoints = 0;
     cout << "\n[Polygon Draw] Enter number of points, then click them." << endl;
 }
 
